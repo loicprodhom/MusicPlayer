@@ -17,6 +17,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -24,6 +28,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // Reference to the bound service — set by MainActivity once bound
     private var musicService: MusicService? = null
+
+    private val playbackReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                MusicService.ACTION_TOGGLE_PLAYBACK -> togglePlayPause()
+                MusicService.ACTION_PREVIOUS        -> skipToPrevious()
+                MusicService.ACTION_NEXT            -> skipToNext()
+                MusicService.ACTION_SONG_COMPLETED  -> onSongCompleted()
+            }
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Permission
@@ -52,8 +67,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** Called by MainActivity once the ServiceConnection is established. */
     fun onServiceConnected(service: MusicService) {
         musicService = service
-        // If permission was already granted (returning user), load songs now.
-        // If not, onPermissionGranted() will call loadSongs() after the grant.
+        registerReceiver()          // ← add this line
         if (_hasPermission.value) {
             loadSongs()
         }
@@ -177,13 +191,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToPrevious() {
-        val service = musicService
-        // If more than 3 s in, restart current track instead of going back
-        if (service != null && service.getCurrentPosition() > 3_000) {
-            service.resume()
-            musicService?.let {
-                // seek to 0 — add seekTo() to MusicService when ready
-            }
+        val service = musicService ?: return
+        if (service.getCurrentPosition() > 3_000) {
+            service.seekTo(0)   // seekTo() now exists in MusicService
             return
         }
         val queue = _queue.value
@@ -192,6 +202,44 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _queueIndex.update { prev }
             startPlayback(queue[prev])
         }
+    }
+
+    private fun onSongCompleted() {
+        val queue = _queue.value
+        val next = _queueIndex.value + 1
+        if (next < queue.size) {
+            _queueIndex.update { next }
+            startPlayback(queue[next])
+        } else {
+            // End of queue — reset state
+            _isPlaying.update { false }
+            _progress.update { 0f }
+            stopProgressPolling()
+        }
+    }
+
+    private fun registerReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(MusicService.ACTION_TOGGLE_PLAYBACK)
+            addAction(MusicService.ACTION_PREVIOUS)
+            addAction(MusicService.ACTION_NEXT)
+            addAction(MusicService.ACTION_SONG_COMPLETED)
+        }
+        ContextCompat.registerReceiver(
+            getApplication(),
+            playbackReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED  // only receive our own broadcasts
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // Cleanup
+    // -------------------------------------------------------------------------
+    override fun onCleared() {
+        super.onCleared()
+        stopProgressPolling()
+        getApplication<Application>().unregisterReceiver(playbackReceiver)
     }
 
     private fun startPlayback(song: Song) {
@@ -224,14 +272,5 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopProgressPolling() {
         progressJob?.cancel()
         progressJob = null
-    }
-
-    // -------------------------------------------------------------------------
-    // Cleanup
-    // -------------------------------------------------------------------------
-
-    override fun onCleared() {
-        super.onCleared()
-        stopProgressPolling()
     }
 }

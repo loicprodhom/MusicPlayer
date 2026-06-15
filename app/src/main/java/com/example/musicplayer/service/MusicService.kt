@@ -51,7 +51,6 @@ class MusicService : Service() {
             start()
             setOnCompletionListener {
                 // Post a broadcast so the ViewModel can advance the queue.
-                // Wire this up in MusicViewModel with a BroadcastReceiver when ready.
                 sendBroadcast(Intent(ACTION_SONG_COMPLETED))
             }
         }
