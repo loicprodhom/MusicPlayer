@@ -245,7 +245,8 @@ private fun AppNavHost(
                 progress = progress,
                 onPlayPause = viewModel::togglePlayPause,
                 onNext = viewModel::skipToNext,
-                onPrevious = viewModel::skipToPrevious
+                onPrevious = viewModel::skipToPrevious,
+                onSeek = viewModel::seekTo
             )
         }
 

@@ -20,7 +20,8 @@ fun NowPlayingScreen(
     progress: Float,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
-    onPrevious: () -> Unit
+    onPrevious: () -> Unit,
+    onSeek: (Float) -> Unit
 ) {
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -49,7 +50,10 @@ fun NowPlayingScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Slider(value = progress, onValueChange = {})
+            Slider(
+                value = progress,
+                onValueChange = onSeek
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 

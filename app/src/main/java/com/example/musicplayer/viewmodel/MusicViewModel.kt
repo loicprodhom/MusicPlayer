@@ -1,6 +1,10 @@
 package com.example.musicplayer.viewmodel
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
@@ -10,6 +14,7 @@ import com.example.musicplayer.data.MusicRepository
 import com.example.musicplayer.data.Playlist
 import com.example.musicplayer.data.Song
 import com.example.musicplayer.service.MusicService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,17 +22,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
+import kotlinx.coroutines.withContext
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = MusicRepository(application)
-
-    // Reference to the bound service — set by MainActivity once bound
     private var musicService: MusicService? = null
+
+    // -------------------------------------------------------------------------
+    // Broadcast receiver — notification buttons & song completion
+    // -------------------------------------------------------------------------
 
     private val playbackReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -57,20 +61,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    /** Called by MainActivity after the user grants storage permission. */
     fun onPermissionGranted(service: MusicService?) {
         _hasPermission.update { true }
         musicService = service
         loadSongs()
     }
 
-    /** Called by MainActivity once the ServiceConnection is established. */
     fun onServiceConnected(service: MusicService) {
         musicService = service
-        registerReceiver()          // ← add this line
-        if (_hasPermission.value) {
-            loadSongs()
-        }
+        registerReceiver()
+        if (_hasPermission.value) loadSongs()
     }
 
     // -------------------------------------------------------------------------
@@ -99,37 +99,51 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadSongs() {
         viewModelScope.launch {
-            val loaded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                repository.loadSongs()
-            }
+            val loaded = withContext(Dispatchers.IO) { repository.loadSongs() }
             _allSongs.update { loaded }
             applyFilter(_searchQuery.value)
+            // Start observing playlists now that we have the song list to join against
+            observePlaylists()
         }
     }
 
     // -------------------------------------------------------------------------
-    // Playlists  (in-memory for now — swap for Room later)
+    // Playlists — Room-backed
     // -------------------------------------------------------------------------
 
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
 
+    private fun observePlaylists() {
+        viewModelScope.launch {
+            repository.observePlaylists(_allSongs.value).collect { list ->
+                _playlists.update { list }
+            }
+        }
+    }
+
     fun createPlaylist(name: String) {
-        val newPlaylist = Playlist(
-            id = System.currentTimeMillis(),
-            name = name,
-            songs = emptyList()
-        )
-        _playlists.update { it + newPlaylist }
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.createPlaylist(name)
+            // observePlaylists() Flow emits automatically — no manual update needed
+        }
+    }
+
+    fun deletePlaylist(playlistId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deletePlaylist(playlistId)
+        }
     }
 
     fun addSongToPlaylist(playlistId: Long, song: Song) {
-        _playlists.update { list ->
-            list.map { playlist ->
-                if (playlist.id == playlistId)
-                    playlist.copy(songs = playlist.songs + song)
-                else playlist
-            }
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.addSongToPlaylist(playlistId, song.id)
+        }
+    }
+
+    fun removeSongFromPlaylist(playlistId: Long, song: Song) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.removeSongFromPlaylist(playlistId, song.id)
         }
     }
 
@@ -146,22 +160,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
-    // 0f..1f fraction used by the Slider in NowPlayingScreen
     private val _progress = MutableStateFlow(0f)
     val progress: StateFlow<Float> = _progress.asStateFlow()
 
     private var progressJob: Job? = null
 
-    /** Play a single song, setting the full library as the queue. */
     fun playSong(song: Song) {
         val queue = _allSongs.value
-        val index = queue.indexOf(song)
         _queue.update { queue }
-        _queueIndex.update { index }
+        _queueIndex.update { queue.indexOf(song) }
         startPlayback(song)
     }
 
-    /** Play all songs from a playlist. */
     fun playPlaylist(playlist: Playlist, startIndex: Int = 0) {
         _queue.update { playlist.songs }
         _queueIndex.update { startIndex }
@@ -181,6 +191,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun seekTo(fraction: Float) {
+        val service = musicService ?: return
+        val positionMs = (fraction * service.getDuration()).toInt()
+        service.seekTo(positionMs)
+        _progress.update { fraction }
+    }
+
     fun skipToNext() {
         val queue = _queue.value
         val next = (_queueIndex.value + 1).coerceAtMost(queue.size - 1)
@@ -193,7 +210,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun skipToPrevious() {
         val service = musicService ?: return
         if (service.getCurrentPosition() > 3_000) {
-            service.seekTo(0)   // seekTo() now exists in MusicService
+            service.seekTo(0)
             return
         }
         val queue = _queue.value
@@ -211,35 +228,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _queueIndex.update { next }
             startPlayback(queue[next])
         } else {
-            // End of queue — reset state
             _isPlaying.update { false }
             _progress.update { 0f }
             stopProgressPolling()
         }
-    }
-
-    private fun registerReceiver() {
-        val filter = IntentFilter().apply {
-            addAction(MusicService.ACTION_TOGGLE_PLAYBACK)
-            addAction(MusicService.ACTION_PREVIOUS)
-            addAction(MusicService.ACTION_NEXT)
-            addAction(MusicService.ACTION_SONG_COMPLETED)
-        }
-        ContextCompat.registerReceiver(
-            getApplication(),
-            playbackReceiver,
-            filter,
-            ContextCompat.RECEIVER_NOT_EXPORTED  // only receive our own broadcasts
-        )
-    }
-
-    // -------------------------------------------------------------------------
-    // Cleanup
-    // -------------------------------------------------------------------------
-    override fun onCleared() {
-        super.onCleared()
-        stopProgressPolling()
-        getApplication<Application>().unregisterReceiver(playbackReceiver)
     }
 
     private fun startPlayback(song: Song) {
@@ -251,7 +243,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // -------------------------------------------------------------------------
     // Progress polling
-    // Polls the service every 500 ms and converts position → 0f..1f
     // -------------------------------------------------------------------------
 
     private fun startProgressPolling() {
@@ -272,5 +263,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopProgressPolling() {
         progressJob?.cancel()
         progressJob = null
+    }
+
+    // -------------------------------------------------------------------------
+    // Receiver registration
+    // -------------------------------------------------------------------------
+
+    private fun registerReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(MusicService.ACTION_TOGGLE_PLAYBACK)
+            addAction(MusicService.ACTION_PREVIOUS)
+            addAction(MusicService.ACTION_NEXT)
+            addAction(MusicService.ACTION_SONG_COMPLETED)
+        }
+        ContextCompat.registerReceiver(
+            getApplication(),
+            playbackReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // Cleanup
+    // -------------------------------------------------------------------------
+
+    override fun onCleared() {
+        super.onCleared()
+        stopProgressPolling()
+        getApplication<Application>().unregisterReceiver(playbackReceiver)
     }
 }
