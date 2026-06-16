@@ -30,6 +30,7 @@ import com.example.musicplayer.service.MusicService
 import com.example.musicplayer.ui.library.LibraryScreen
 import com.example.musicplayer.ui.nowplaying.NowPlayingScreen
 import com.example.musicplayer.ui.permission.PermissionScreen
+import com.example.musicplayer.ui.playlistdetail.PlaylistDetailScreen
 import com.example.musicplayer.ui.playlists.PlaylistsScreen
 import com.example.musicplayer.ui.theme.MusicPlayerTheme
 import com.example.musicplayer.viewmodel.MusicViewModel
@@ -193,14 +194,11 @@ fun MusicPlayerApp(
 // ---------------------------------------------------------------------------
 // NavHost — one composable() per screen
 // ---------------------------------------------------------------------------
-
 @Composable
 private fun AppNavHost(
     navController: androidx.navigation.NavHostController,
     viewModel: MusicViewModel
 ) {
-    // Collect state once here and pass down as plain values (avoids
-    // re-collecting inside each screen on every recomposition)
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
@@ -218,7 +216,7 @@ private fun AppNavHost(
                 songs = songs,
                 searchQuery = searchQuery,
                 onSearchChange = viewModel::onSearchQueryChange,
-                onSongClick = { song: Song ->
+                onSongClick = { song ->
                     viewModel.playSong(song)
                     navController.navigate(Screen.NowPlaying.route)
                 }
@@ -229,11 +227,10 @@ private fun AppNavHost(
             PlaylistsScreen(
                 playlists = playlists,
                 onPlaylistClick = { playlist ->
-                    // TODO: navigate to PlaylistDetailScreen
-                    // navController.navigate("playlist/${playlist.id}")
+                    navController.navigate("playlist/${playlist.id}")
                 },
-                onCreateClick = {
-                    // TODO: show create-playlist dialog
+                onCreateClick = { name ->
+                    viewModel.createPlaylist(name)
                 }
             )
         }
@@ -250,16 +247,25 @@ private fun AppNavHost(
             )
         }
 
-        // Uncomment when PlaylistDetailScreen navigation is wired up:
-        // composable("playlist/{playlistId}") { backStackEntry ->
-        //     val id = backStackEntry.arguments?.getString("playlistId")?.toLongOrNull()
-        //     val playlist = playlists.find { it.id == id }
-        //     playlist?.let {
-        //         PlaylistDetailScreen(
-        //             playlist = it,
-        //             onSongClick = { song -> viewModel.playSong(song) }
-        //         )
-        //     }
-        // }
+        composable("playlist/{playlistId}") { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("playlistId")?.toLongOrNull()
+            val playlist = playlists.find { it.id == id }
+            playlist?.let {
+                PlaylistDetailScreen(
+                    playlist = it,
+                    onPlayAll = {
+                        viewModel.playPlaylist(it)
+                        navController.navigate(Screen.NowPlaying.route)
+                    },
+                    onSongClick = { song ->
+                        viewModel.playSong(song)
+                        navController.navigate(Screen.NowPlaying.route)
+                    },
+                    onRemoveSong = { song ->
+                        viewModel.removeSongFromPlaylist(it.id, song)
+                    }
+                )
+            }
+        }
     }
 }

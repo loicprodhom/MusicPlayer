@@ -1,9 +1,9 @@
 package com.example.musicplayer.ui.library
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -14,19 +14,23 @@ import androidx.compose.ui.unit.dp
 import com.example.musicplayer.R
 import com.example.musicplayer.data.Song
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongRow(
     song: Song,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null   // optional — not all screens need it
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-
         Image(
             painter = painterResource(R.drawable.music_note),
             contentDescription = null,
