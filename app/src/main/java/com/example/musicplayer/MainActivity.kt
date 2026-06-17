@@ -205,6 +205,8 @@ private fun AppNavHost(
     val currentSong by viewModel.currentSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val progress by viewModel.progress.collectAsState()
+    val shuffleEnabled by viewModel.shuffleEnabled.collectAsState()
+    val repeatMode by viewModel.repeatMode.collectAsState()
 
     NavHost(
         navController = navController,
@@ -240,10 +242,14 @@ private fun AppNavHost(
                 song = currentSong,
                 isPlaying = isPlaying,
                 progress = progress,
+                shuffleEnabled = shuffleEnabled,
+                repeatMode = repeatMode,
                 onPlayPause = viewModel::togglePlayPause,
                 onNext = viewModel::skipToNext,
                 onPrevious = viewModel::skipToPrevious,
-                onSeek = viewModel::seekTo
+                onSeek = viewModel::seekTo,
+                onToggleShuffle = viewModel::toggleShuffle,
+                onCycleRepeat = viewModel::cycleRepeatMode
             )
         }
 
