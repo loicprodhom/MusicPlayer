@@ -22,7 +22,8 @@ fun LibraryScreen(
     onSongClick: (Song) -> Unit,
     playlists: List<Playlist>,
     onAddToPlaylist: (songs: Set<Song>, playlistId: Long) -> Unit,
-    onCreatePlaylist: (name: String) -> Unit
+    // Separate callback for "New playlist" inside picker — creates + adds atomically
+    onCreateAndAddToPlaylist: (name: String, songs: Set<Song>) -> Unit
 ) {
     var selectionMode by remember { mutableStateOf(false) }
     var selectedSongs by remember { mutableStateOf(setOf<Song>()) }
@@ -91,20 +92,18 @@ fun LibraryScreen(
     }
 
     if (showPlaylistPicker) {
+        // Capture selectedSongs at the moment the picker opens so it doesn't
+        // change under us if the user somehow triggers recomposition
+        val songsToAdd = selectedSongs
         PlaylistPickerDialog(
             playlists = playlists,
             onPlaylistSelected = { playlistId ->
-                onAddToPlaylist(selectedSongs, playlistId)
+                onAddToPlaylist(songsToAdd, playlistId)
                 showPlaylistPicker = false
                 exitSelectionMode()
             },
             onCreateNewPlaylist = { name ->
-                // Create the playlist then add songs to it.
-                // ViewModel returns the new ID via callback so we can add immediately.
-                onCreatePlaylist(name)
-                // onCreatePlaylist triggers a DB insert whose Flow emission updates
-                // playlists — we close and let the user re-open to pick it, OR the
-                // caller can provide the new ID directly (see AppNavHost note below).
+                onCreateAndAddToPlaylist(name, songsToAdd)
                 showPlaylistPicker = false
                 exitSelectionMode()
             },
@@ -137,7 +136,6 @@ private fun SelectionAppBar(
                 contentDescription = "Cancel selection"
             )
         }
-
         Text(
             text = "$selectedCount selected",
             style = MaterialTheme.typography.titleMedium,
@@ -146,11 +144,9 @@ private fun SelectionAppBar(
                 .padding(start = 8.dp)
                 .wrapContentHeight()
         )
-
         TextButton(onClick = onSelectAll) {
             Text("All ($totalCount)")
         }
-
         IconButton(
             onClick = onAddToPlaylist,
             enabled = selectedCount > 0
@@ -164,7 +160,7 @@ private fun SelectionAppBar(
 }
 
 // -----------------------------------------------------------------------------
-// Playlist picker dialog — with inline "New playlist" entry
+// Playlist picker dialog
 // -----------------------------------------------------------------------------
 
 @Composable
@@ -191,7 +187,6 @@ private fun PlaylistPickerDialog(
             title = { Text("Add to playlist") },
             text = {
                 Column {
-                    // "New playlist" always at the top
                     TextButton(
                         onClick = { showCreateDialog = true },
                         modifier = Modifier.fillMaxWidth()
@@ -211,7 +206,6 @@ private fun PlaylistPickerDialog(
 
                     if (userPlaylists.isNotEmpty()) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
                         userPlaylists.forEach { playlist ->
                             TextButton(
                                 onClick = { onPlaylistSelected(playlist.id) },
