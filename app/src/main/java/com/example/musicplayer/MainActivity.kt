@@ -221,6 +221,12 @@ private fun AppNavHost(
                 onSongClick = { song ->
                     viewModel.playSong(song)
                     navController.navigate(Screen.NowPlaying.route)
+                },
+                playlists = playlists,
+                onAddToPlaylist = { selectedSongs, playlistId ->
+                    selectedSongs.forEach { song ->
+                        viewModel.addSongToPlaylist(playlistId, song)
+                    }
                 }
             )
         }

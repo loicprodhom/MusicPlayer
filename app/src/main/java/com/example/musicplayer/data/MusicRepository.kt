@@ -67,7 +67,7 @@ class MusicRepository(private val context: Context) {
      * Returns the [limit] most recently added songs, newest first.
      * Used to build the "Recently Added" synthetic playlist.
      */
-    fun loadRecentlyAdded(limit: Int = 50): List<Song> {
+    fun loadRecentlyAdded(limit: Int = 200): List<Song> {
         return querySongs(
             sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC",
             limit = limit
