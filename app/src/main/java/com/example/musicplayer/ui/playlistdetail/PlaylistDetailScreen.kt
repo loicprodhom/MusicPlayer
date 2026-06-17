@@ -5,11 +5,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.example.musicplayer.R
 import com.example.musicplayer.data.Playlist
 import com.example.musicplayer.data.Song
-import com.example.musicplayer.ui.components.SimpleAppBar
 import com.example.musicplayer.ui.library.SongRow
 
 @Composable
@@ -17,14 +19,64 @@ fun PlaylistDetailScreen(
     playlist: Playlist,
     onPlayAll: () -> Unit,
     onSongClick: (Song) -> Unit,
-    onRemoveSong: (Song) -> Unit
+    onRemoveSong: (Song) -> Unit,
+    onDeletePlaylist: () -> Unit,
+    onBack: () -> Unit
 ) {
-    // Tracks which song's dropdown is open; null means none
     var menuOpenForSong by remember { mutableStateOf<Song?>(null) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    // Delete confirmation dialog
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete playlist") },
+            text = { Text("Delete \"${playlist.name}\"? This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePlaylist()
+                        showDeleteConfirm = false
+                        onBack()        // navigate back after deletion
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        SimpleAppBar(title = playlist.name)
+        // App bar with back button and delete action
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    painter = painterResource(R.drawable.baseline_arrow_back_24),
+                    contentDescription = "Back"
+                )
+            }
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = { showDeleteConfirm = true }) {
+                Icon(
+                    painter = painterResource(R.drawable.baseline_delete_24),
+                    contentDescription = "Delete playlist",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+        }
 
         Button(
             onClick = onPlayAll,
@@ -41,7 +93,7 @@ fun PlaylistDetailScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(32.dp),
-                contentAlignment = androidx.compose.ui.Alignment.Center
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     "No songs yet",
@@ -58,8 +110,6 @@ fun PlaylistDetailScreen(
                             onClick = { onSongClick(song) },
                             onLongClick = { menuOpenForSong = song }
                         )
-
-                        // Dropdown anchored to the row that was long-pressed
                         DropdownMenu(
                             expanded = menuOpenForSong == song,
                             onDismissRequest = { menuOpenForSong = null }

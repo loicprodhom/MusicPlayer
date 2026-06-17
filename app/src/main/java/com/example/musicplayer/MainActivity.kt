@@ -238,8 +238,6 @@ private fun AppNavHost(
                         viewModel.addSongToPlaylist(playlistId, song)
                     }
                 },
-                // Called when "New playlist" is chosen inside the picker —
-                // creates the playlist AND adds the currently selected songs atomically
                 onCreateAndAddToPlaylist = { name, selectedSongs ->
                     viewModel.createPlaylistAndAdd(name, selectedSongs)
                 }
@@ -254,6 +252,9 @@ private fun AppNavHost(
                 },
                 onCreateClick = { name ->
                     viewModel.createPlaylist(name)
+                },
+                onDeletePlaylist = { playlist ->
+                    viewModel.deletePlaylist(playlist.id)
                 }
             )
         }
@@ -291,7 +292,11 @@ private fun AppNavHost(
                     },
                     onRemoveSong = { song ->
                         viewModel.removeSongFromPlaylist(it.id, song)
-                    }
+                    },
+                    onDeletePlaylist = {
+                        viewModel.deletePlaylist(it.id)
+                    },
+                    onBack = { navController.popBackStack() }
                 )
             }
         }
