@@ -227,6 +227,11 @@ private fun AppNavHost(
                     selectedSongs.forEach { song ->
                         viewModel.addSongToPlaylist(playlistId, song)
                     }
+                },
+                onCreatePlaylist = { name ->
+                    // Called when user picks "New playlist" from the picker
+                    // but has NOT yet selected songs — plain create.
+                    viewModel.createPlaylist(name)
                 }
             )
         }

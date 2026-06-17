@@ -161,6 +161,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) { repository.createPlaylist(name) }
     }
 
+    /**
+     * Creates a new playlist and immediately adds the given songs to it.
+     * This avoids the race condition of creating a playlist and then trying
+     * to look up its ID from the Flow before the DB has emitted.
+     */
+    fun createPlaylistAndAdd(name: String, songs: Set<Song>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val newId = repository.createPlaylist(name)   // returns the new row ID
+            songs.forEach { song ->
+                repository.addSongToPlaylist(newId, song.id)
+            }
+            // The observePlaylists() Flow will emit automatically with the new playlist
+            // already populated, so no manual state update is needed here.
+        }
+    }
+
     fun deletePlaylist(playlistId: Long) {
         if (playlistId == RECENTLY_ADDED_ID) return  // protect synthetic playlist
         viewModelScope.launch(Dispatchers.IO) { repository.deletePlaylist(playlistId) }

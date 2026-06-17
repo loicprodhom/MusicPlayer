@@ -11,6 +11,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.example.musicplayer.R
 import com.example.musicplayer.data.Playlist
+import com.example.musicplayer.ui.components.CreatePlaylistDialog
 import com.example.musicplayer.ui.components.SimpleAppBar
 
 @Composable
@@ -27,7 +28,10 @@ fun PlaylistsScreen(
             title = "Playlists",
             actions = {
                 IconButton(onClick = { showDialog = true }) {
-                    Image(painterResource(R.drawable.add), contentDescription = "Create playlist")
+                    Image(
+                        painterResource(R.drawable.baseline_add_24),
+                        contentDescription = "Create playlist"
+                    )
                 }
             }
         )
@@ -54,36 +58,4 @@ fun PlaylistsScreen(
             onDismiss = { showDialog = false }
         )
     }
-}
-
-@Composable
-private fun CreatePlaylistDialog(
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New Playlist") },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                placeholder = { Text("Playlist name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (name.isNotBlank()) onConfirm(name.trim()) },
-                enabled = name.isNotBlank()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
 }

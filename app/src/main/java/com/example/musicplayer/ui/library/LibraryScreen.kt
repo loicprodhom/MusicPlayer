@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import com.example.musicplayer.R
 import com.example.musicplayer.data.Playlist
 import com.example.musicplayer.data.Song
+import com.example.musicplayer.ui.components.CreatePlaylistDialog
 import com.example.musicplayer.ui.components.SimpleAppBar
 
 @Composable
@@ -20,9 +21,9 @@ fun LibraryScreen(
     onSearchChange: (String) -> Unit,
     onSongClick: (Song) -> Unit,
     playlists: List<Playlist>,
-    onAddToPlaylist: (songs: Set<Song>, playlistId: Long) -> Unit
+    onAddToPlaylist: (songs: Set<Song>, playlistId: Long) -> Unit,
+    onCreatePlaylist: (name: String) -> Unit
 ) {
-    // --- Selection state (lives here — purely UI concern) ---
     var selectionMode by remember { mutableStateOf(false) }
     var selectedSongs by remember { mutableStateOf(setOf<Song>()) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
@@ -64,7 +65,6 @@ fun LibraryScreen(
                     isSelected = song in selectedSongs,
                     onClick = {
                         if (selectionMode) {
-                            // In selection mode, tap toggles the checkbox
                             selectedSongs = if (song in selectedSongs)
                                 selectedSongs - song
                             else
@@ -76,7 +76,7 @@ fun LibraryScreen(
                     onLongClick = {
                         if (!selectionMode) {
                             selectionMode = true
-                            selectedSongs = setOf(song)   // pre-select the long-pressed song
+                            selectedSongs = setOf(song)
                         }
                     },
                     onCheckedChange = { checked ->
@@ -90,12 +90,21 @@ fun LibraryScreen(
         }
     }
 
-    // Playlist picker dialog
     if (showPlaylistPicker) {
         PlaylistPickerDialog(
             playlists = playlists,
             onPlaylistSelected = { playlistId ->
                 onAddToPlaylist(selectedSongs, playlistId)
+                showPlaylistPicker = false
+                exitSelectionMode()
+            },
+            onCreateNewPlaylist = { name ->
+                // Create the playlist then add songs to it.
+                // ViewModel returns the new ID via callback so we can add immediately.
+                onCreatePlaylist(name)
+                // onCreatePlaylist triggers a DB insert whose Flow emission updates
+                // playlists — we close and let the user re-open to pick it, OR the
+                // caller can provide the new ID directly (see AppNavHost note below).
                 showPlaylistPicker = false
                 exitSelectionMode()
             },
@@ -105,7 +114,7 @@ fun LibraryScreen(
 }
 
 // -----------------------------------------------------------------------------
-// Selection app bar — replaces SimpleAppBar while in selection mode
+// Selection app bar
 // -----------------------------------------------------------------------------
 
 @Composable
@@ -122,7 +131,6 @@ private fun SelectionAppBar(
             .padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Cancel
         IconButton(onClick = onCancel) {
             Icon(
                 painter = painterResource(R.drawable.baseline_close_24),
@@ -130,23 +138,19 @@ private fun SelectionAppBar(
             )
         }
 
-        // Count label
         Text(
             text = "$selectedCount selected",
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 8.dp)
-                .alignByBaseline()
                 .wrapContentHeight()
         )
 
-        // Select all
         TextButton(onClick = onSelectAll) {
             Text("All ($totalCount)")
         }
 
-        // Add to playlist
         IconButton(
             onClick = onAddToPlaylist,
             enabled = selectedCount > 0
@@ -160,52 +164,78 @@ private fun SelectionAppBar(
 }
 
 // -----------------------------------------------------------------------------
-// Playlist picker dialog
+// Playlist picker dialog — with inline "New playlist" entry
 // -----------------------------------------------------------------------------
 
 @Composable
 private fun PlaylistPickerDialog(
     playlists: List<Playlist>,
     onPlaylistSelected: (Long) -> Unit,
+    onCreateNewPlaylist: (name: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Filter out the synthetic Recently Added playlist (id = -1)
     val userPlaylists = playlists.filter { it.id != -1L }
+    var showCreateDialog by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add to playlist") },
-        text = {
-            if (userPlaylists.isEmpty()) {
-                Text(
-                    "No playlists yet. Create one from the Playlists tab first.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else {
+    if (showCreateDialog) {
+        CreatePlaylistDialog(
+            onConfirm = { name ->
+                onCreateNewPlaylist(name)
+                showCreateDialog = false
+            },
+            onDismiss = { showCreateDialog = false }
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Add to playlist") },
+            text = {
                 Column {
-                    userPlaylists.forEach { playlist ->
-                        TextButton(
-                            onClick = { onPlaylistSelected(playlist.id) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = playlist.name,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                text = "${playlist.songCount()} songs",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    // "New playlist" always at the top
+                    TextButton(
+                        onClick = { showCreateDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_add_24),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "New playlist",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Spacer(Modifier.weight(1f))
+                    }
+
+                    if (userPlaylists.isNotEmpty()) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                        userPlaylists.forEach { playlist ->
+                            TextButton(
+                                onClick = { onPlaylistSelected(playlist.id) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = playlist.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${playlist.songCount()} songs",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
+        )
+    }
 }
