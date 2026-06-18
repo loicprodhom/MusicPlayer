@@ -47,15 +47,27 @@ class MusicService : Service() {
 
         mediaPlayer = MediaPlayer().apply {
             setDataSource(applicationContext, song.uri)
-            prepare()
-            start()
+            setOnPreparedListener { mp ->
+                mp.start()
+                onPlayerPrepared(song)
+                sendBroadcast(Intent(ACTION_PLAYBACK_STARTED))
+            }
             setOnCompletionListener {
-                // Post a broadcast so the ViewModel can advance the queue.
                 sendBroadcast(Intent(ACTION_SONG_COMPLETED))
             }
+            setOnErrorListener { _, _, _ ->
+                sendBroadcast(Intent(ACTION_PLAYBACK_ERROR))
+                true
+            }
+            prepareAsync()   // non-blocking — onPreparedListener fires when ready
         }
 
         currentSong = song
+        // Don't call startForeground here yet — wait for onPrepared so the
+        // notification appears only when audio is actually starting
+    }
+
+    private fun onPlayerPrepared(song: Song) {
         startForeground(NOTIFICATION_ID, buildNotification(song, isPlaying = true))
     }
 
@@ -182,5 +194,7 @@ class MusicService : Service() {
         const val ACTION_PREVIOUS        = "com.example.musicplayer.PREVIOUS"
         const val ACTION_NEXT            = "com.example.musicplayer.NEXT"
         const val ACTION_SONG_COMPLETED  = "com.example.musicplayer.SONG_COMPLETED"
+        const val ACTION_PLAYBACK_STARTED = "com.example.musicplayer.PLAYBACK_STARTED"
+        const val ACTION_PLAYBACK_ERROR   = "com.example.musicplayer.PLAYBACK_ERROR"
     }
 }

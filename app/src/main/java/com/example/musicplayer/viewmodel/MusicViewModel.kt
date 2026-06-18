@@ -41,10 +41,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val playbackReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                MusicService.ACTION_TOGGLE_PLAYBACK -> togglePlayPause()
-                MusicService.ACTION_PREVIOUS        -> skipToPrevious()
-                MusicService.ACTION_NEXT            -> skipToNext()
-                MusicService.ACTION_SONG_COMPLETED  -> onSongCompleted()
+                MusicService.ACTION_PLAYBACK_STARTED   -> onPlaybackStarted()
+                MusicService.ACTION_TOGGLE_PLAYBACK    -> togglePlayPause()
+                MusicService.ACTION_PREVIOUS           -> skipToPrevious()
+                MusicService.ACTION_NEXT               -> skipToNext()
+                MusicService.ACTION_SONG_COMPLETED     -> onSongCompleted()
+                MusicService.ACTION_PLAYBACK_ERROR     -> onPlaybackError()
             }
         }
     }
@@ -388,8 +390,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun startPlayback(song: Song) {
         musicService?.play(song)
         _currentSong.update { song }
+        // onPlaybackStarted() fires via broadcast once prepareAsync() completes.
+    }
+
+    private fun onPlaybackStarted() {
+        // Called once prepareAsync() completes and the player has actually started.
+        // This is the only place we authoritatively set isPlaying = true.
         _isPlaying.update { true }
         startProgressPolling()
+    }
+
+    private fun onPlaybackError() {
+        _isPlaying.update { false }
+        stopProgressPolling()
     }
 
     // -------------------------------------------------------------------------
@@ -422,10 +435,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun registerReceiver() {
         val filter = IntentFilter().apply {
+            addAction(MusicService.ACTION_PLAYBACK_STARTED)
             addAction(MusicService.ACTION_TOGGLE_PLAYBACK)
             addAction(MusicService.ACTION_PREVIOUS)
             addAction(MusicService.ACTION_NEXT)
             addAction(MusicService.ACTION_SONG_COMPLETED)
+            addAction(MusicService.ACTION_PLAYBACK_ERROR)
         }
         ContextCompat.registerReceiver(
             getApplication(),
@@ -433,8 +448,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             filter,
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
-
-        // Reload songs (and refresh Recently Added) whenever MediaStore changes
         repository.registerMediaObserver { loadSongs() }
     }
 
