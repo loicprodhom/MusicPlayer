@@ -210,7 +210,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _shuffleEnabled = MutableStateFlow(false)
     val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled.asStateFlow()
 
-    private val _repeatMode = MutableStateFlow(RepeatMode.OFF)
+    private val _repeatMode = MutableStateFlow(RepeatMode.REPEAT_ALL)
     val repeatMode: StateFlow<RepeatMode> = _repeatMode.asStateFlow()
 
     private val _queue = MutableStateFlow<List<Song>>(emptyList())

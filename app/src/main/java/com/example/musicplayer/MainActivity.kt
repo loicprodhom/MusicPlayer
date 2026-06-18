@@ -8,6 +8,7 @@ import android.content.ServiceConnection
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -209,6 +210,12 @@ private fun AppNavHost(
     navController: androidx.navigation.NavHostController,
     viewModel: MusicViewModel
 ) {
+    //TODO Remove debug when not needed
+    //debug
+    val currentEntry by navController.currentBackStackEntryAsState()
+    LaunchedEffect(currentEntry) {
+        android.util.Log.d("NAV", "Current route: ${currentEntry?.destination?.route}")
+    }
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
@@ -231,8 +238,11 @@ private fun AppNavHost(
                 onSongClick = { song ->
                     viewModel.playSong(song)
                     navController.navigate(Screen.NowPlaying.route) {
-                        popUpTo(Screen.Library.route)
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
                         launchSingleTop = true
+                        restoreState = true
                     }
                 },
                 playlists = playlists,

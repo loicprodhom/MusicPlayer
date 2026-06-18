@@ -14,6 +14,8 @@ import com.example.musicplayer.data.Playlist
 import com.example.musicplayer.data.Song
 import com.example.musicplayer.ui.library.SongRow
 
+private const val RECENTLY_ADDED_ID = -1L
+
 @Composable
 fun PlaylistDetailScreen(
     playlist: Playlist,
@@ -69,12 +71,14 @@ fun PlaylistDetailScreen(
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { showDeleteConfirm = true }) {
-                Icon(
-                    painter = painterResource(R.drawable.baseline_delete_24),
-                    contentDescription = "Delete playlist",
-                    tint = MaterialTheme.colorScheme.error
-                )
+            if (playlist.id != RECENTLY_ADDED_ID) {
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(
+                        painter = painterResource(R.drawable.baseline_delete_24),
+                        contentDescription = "Delete playlist",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         }
 
