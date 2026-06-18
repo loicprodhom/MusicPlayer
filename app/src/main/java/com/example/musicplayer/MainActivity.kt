@@ -145,7 +145,7 @@ fun MusicPlayerApp(
     Scaffold(
         bottomBar = {
             Column {
-                // Mini player — shown whenever a song is loaded and we're NOT
+                // Mini player — shown whenever a song is loaded, and we're NOT
                 // already on the NowPlaying screen
                 val song = currentSong
                 if (song != null && currentRoute != Screen.NowPlaying.route) {
@@ -230,7 +230,10 @@ private fun AppNavHost(
                 onSearchChange = viewModel::onSearchQueryChange,
                 onSongClick = { song ->
                     viewModel.playSong(song)
-                    navController.navigate(Screen.NowPlaying.route)
+                    navController.navigate(Screen.NowPlaying.route) {
+                        popUpTo(Screen.Library.route)
+                        launchSingleTop = true
+                    }
                 },
                 playlists = playlists,
                 onAddToPlaylist = { selectedSongs, playlistId ->
