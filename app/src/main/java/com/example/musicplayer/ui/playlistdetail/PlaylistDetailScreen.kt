@@ -19,6 +19,7 @@ private const val RECENTLY_ADDED_ID = -1L
 @Composable
 fun PlaylistDetailScreen(
     playlist: Playlist,
+    currentSong: Song?,
     onPlayAll: () -> Unit,
     onSongClick: (Song) -> Unit,
     onRemoveSong: (Song) -> Unit,
@@ -111,6 +112,7 @@ fun PlaylistDetailScreen(
                     Box {
                         SongRow(
                             song = song,
+                            isCurrentlyPlaying = song == currentSong,
                             onClick = { onSongClick(song) },
                             onLongClick = { menuOpenForSong = song }
                         )

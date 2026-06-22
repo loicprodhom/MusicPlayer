@@ -235,6 +235,7 @@ private fun AppNavHost(
                 songs = songs,
                 searchQuery = searchQuery,
                 onSearchChange = viewModel::onSearchQueryChange,
+                currentSong = currentSong,
                 onSongClick = { song ->
                     viewModel.playSong(song)
                     navController.navigate(Screen.NowPlaying.route) {
@@ -295,6 +296,7 @@ private fun AppNavHost(
             playlist?.let {
                 PlaylistDetailScreen(
                     playlist = it,
+                    currentSong = currentSong,
                     onPlayAll = {
                         viewModel.playPlaylist(it)
                         navController.navigate(Screen.NowPlaying.route)

@@ -41,7 +41,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val playbackReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                MusicService.ACTION_PLAYBACK_STARTED   -> onPlaybackStarted()
                 MusicService.ACTION_TOGGLE_PLAYBACK    -> togglePlayPause()
                 MusicService.ACTION_PREVIOUS           -> skipToPrevious()
                 MusicService.ACTION_NEXT               -> skipToNext()
@@ -306,7 +305,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun togglePlayPause() {
         val service = musicService ?: return
-        if (service.isPlaying()) {
+        if (_isPlaying.value) {
             service.pause()
             _isPlaying.update { false }
             stopProgressPolling()
@@ -407,12 +406,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         stopProgressPolling()
         musicService?.play(song)
         _currentSong.update { song }
-        // onPlaybackStarted() fires via broadcast once prepareAsync() completes.
-    }
-
-    private fun onPlaybackStarted() {
-        // Called once prepareAsync() completes and the player has actually started.
-        // This is the only place we authoritatively set isPlaying = true.
         _isPlaying.update { true }
         startProgressPolling()
     }
@@ -430,13 +423,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         stopProgressPolling()
         progressJob = viewModelScope.launch {
             while (true) {
-                val service = musicService
-                if (service != null && service.isPlaying()) {
-                    val pos = service.getCurrentPosition().toFloat()
-                    val dur = service.getDuration().toFloat()
-                    if (dur > 0f) _progress.update { pos / dur }
-                }
                 delay(500)
+                // Only poll if ViewModel believes we are playing
+                if (_isPlaying.value) {
+                    val service = musicService ?: continue
+                    val dur = service.getDuration()
+                    if (dur > 0) {
+                        _progress.update { service.getCurrentPosition().toFloat() / dur.toFloat() }
+                    }
+                    // If service reports not playing but ViewModel thinks it is,
+                    // it means prepareAsync hasn't completed yet — just wait
+                }
             }
         }
     }
@@ -452,7 +449,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun registerReceiver() {
         val filter = IntentFilter().apply {
-            addAction(MusicService.ACTION_PLAYBACK_STARTED)
             addAction(MusicService.ACTION_TOGGLE_PLAYBACK)
             addAction(MusicService.ACTION_PREVIOUS)
             addAction(MusicService.ACTION_NEXT)

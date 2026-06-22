@@ -21,8 +21,8 @@ fun LibraryScreen(
     onSearchChange: (String) -> Unit,
     onSongClick: (Song) -> Unit,
     playlists: List<Playlist>,
+    currentSong: Song?,                    // ← add this
     onAddToPlaylist: (songs: Set<Song>, playlistId: Long) -> Unit,
-    // Separate callback for "New playlist" inside picker — creates + adds atomically
     onCreateAndAddToPlaylist: (name: String, songs: Set<Song>) -> Unit
 ) {
     var selectionMode by remember { mutableStateOf(false) }
@@ -64,6 +64,7 @@ fun LibraryScreen(
                     song = song,
                     selectionMode = selectionMode,
                     isSelected = song in selectedSongs,
+                    isCurrentlyPlaying = song == currentSong,
                     onClick = {
                         if (selectionMode) {
                             selectedSongs = if (song in selectedSongs)

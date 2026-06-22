@@ -49,8 +49,7 @@ class MusicService : Service() {
             setDataSource(applicationContext, song.uri)
             setOnPreparedListener { mp ->
                 mp.start()
-                onPlayerPrepared(song)
-                sendBroadcast(Intent(ACTION_PLAYBACK_STARTED))
+                startForeground(NOTIFICATION_ID, buildNotification(song, isPlaying = true))
             }
             setOnCompletionListener {
                 sendBroadcast(Intent(ACTION_SONG_COMPLETED))
@@ -59,12 +58,10 @@ class MusicService : Service() {
                 sendBroadcast(Intent(ACTION_PLAYBACK_ERROR))
                 true
             }
-            prepareAsync()   // non-blocking — onPreparedListener fires when ready
+            prepareAsync()
         }
 
         currentSong = song
-        // Don't call startForeground here yet — wait for onPrepared so the
-        // notification appears only when audio is actually starting
     }
 
     private fun onPlayerPrepared(song: Song) {
@@ -194,7 +191,6 @@ class MusicService : Service() {
         const val ACTION_PREVIOUS        = "com.example.musicplayer.PREVIOUS"
         const val ACTION_NEXT            = "com.example.musicplayer.NEXT"
         const val ACTION_SONG_COMPLETED  = "com.example.musicplayer.SONG_COMPLETED"
-        const val ACTION_PLAYBACK_STARTED = "com.example.musicplayer.PLAYBACK_STARTED"
         const val ACTION_PLAYBACK_ERROR   = "com.example.musicplayer.PLAYBACK_ERROR"
     }
 }
