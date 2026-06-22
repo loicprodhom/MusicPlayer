@@ -325,12 +325,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToNext() {
-        if (_repeatMode.value == RepeatMode.REPEAT_ONE) {
-            // Explicitly skipping overrides repeat-one and moves to next
-            advanceQueue()
-            return
+        val queue = activeQueue
+        val next = _queueIndex.value + 1
+        if (next < queue.size) {
+            _queueIndex.update { next }
+            startPlayback(queue[next])
+        } else {
+            // End of queue
+            when (_repeatMode.value) {
+                RepeatMode.REPEAT_ALL -> {
+                    if (_shuffleEnabled.value) buildShuffledQueue(preserveCurrent = false)
+                    _queueIndex.update { 0 }
+                    activeQueue.getOrNull(0)?.let { startPlayback(it) }
+                }
+                else -> {
+                    // REPEAT_ONE handled by the service, OFF stops here
+                    _isPlaying.update { false }
+                    _progress.update { 0f }
+                    stopProgressPolling()
+                }
+            }
         }
-        advanceQueue()
     }
 
     fun skipToPrevious() {
@@ -350,20 +365,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun onSongCompleted() {
         when (_repeatMode.value) {
             RepeatMode.REPEAT_ONE -> {
-                // Replay same song
                 _currentSong.value?.let { startPlayback(it) }
             }
             RepeatMode.REPEAT_ALL -> {
                 val queue = activeQueue
                 val next = _queueIndex.value + 1
-                if (next >= queue.size) {
-                    // End of queue — reshuffle if needed then wrap to start
-                    if (_shuffleEnabled.value) buildShuffledQueue(preserveCurrent = false)
+                if (next < queue.size) {
+                    _queueIndex.update { next }
+                    startPlayback(queue[next])
+                } else {
+                    // End of queue — loop back to start
+                    if (_shuffleEnabled.value) {
+                        buildShuffledQueue(preserveCurrent = false)
+                    }
                     _queueIndex.update { 0 }
                     activeQueue.getOrNull(0)?.let { startPlayback(it) }
-                } else {
-                    _queueIndex.update { next }
-                    activeQueue.getOrNull(next)?.let { startPlayback(it) }
                 }
             }
             RepeatMode.OFF -> {
@@ -388,6 +404,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startPlayback(song: Song) {
+        stopProgressPolling()
         musicService?.play(song)
         _currentSong.update { song }
         // onPlaybackStarted() fires via broadcast once prepareAsync() completes.
