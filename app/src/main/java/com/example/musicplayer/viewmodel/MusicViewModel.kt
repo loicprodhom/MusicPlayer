@@ -27,7 +27,7 @@ import kotlinx.coroutines.withContext
 
 // Sentinel playlist ID for the synthetic "Recently Added" playlist
 private const val RECENTLY_ADDED_ID = -1L
-private const val RECENTLY_ADDED_LIMIT = 50
+private const val RECENTLY_ADDED_LIMIT = 200
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
