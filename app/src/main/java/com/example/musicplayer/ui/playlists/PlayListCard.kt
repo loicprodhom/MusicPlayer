@@ -61,6 +61,11 @@ fun PlaylistCard(
                     text = "${playlist.songCount()} songs",
                     style = MaterialTheme.typography.bodySmall
                 )
+                Text(
+                    text = formatDuration(playlist.totalDuration()),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // Trash icon overlay — only visible after long-press, only for deletable playlists
@@ -83,4 +88,12 @@ fun PlaylistCard(
             }
         }
     }
+}
+
+private fun formatDuration(totalMs: Long): String {
+    val totalSeconds = totalMs / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    return if (hours > 0) "${hours}h ${minutes}m"
+    else "${minutes}m"
 }

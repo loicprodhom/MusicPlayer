@@ -297,16 +297,35 @@ private fun AppNavHost(
                 PlaylistDetailScreen(
                     playlist = it,
                     currentSong = currentSong,
+                    allPlaylists = playlists,
                     onPlayAll = {
                         viewModel.playPlaylist(it)
-                        navController.navigate(Screen.NowPlaying.route)
+                        navController.navigate(Screen.NowPlaying.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
                     onSongClick = { song ->
                         viewModel.playSong(song)
-                        navController.navigate(Screen.NowPlaying.route)
+                        navController.navigate(Screen.NowPlaying.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
-                    onRemoveSong = { song ->
-                        viewModel.removeSongFromPlaylist(it.id, song)
+                    onRemoveSongs = { songs ->
+                        viewModel.removeSongsFromPlaylist(it.id, songs)
+                    },
+                    onAddSongsToPlaylist = { songs, playlistId ->
+                        viewModel.addSongsToPlaylist(playlistId, songs)
+                    },
+                    onCreatePlaylistAndAdd = { name, songs ->
+                        viewModel.createPlaylistAndAdd(name, songs)
                     },
                     onDeletePlaylist = {
                         viewModel.deletePlaylist(it.id)

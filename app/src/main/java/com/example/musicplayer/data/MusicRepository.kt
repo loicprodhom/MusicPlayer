@@ -125,12 +125,16 @@ class MusicRepository(private val context: Context) {
     // Playlists — Room
     // -------------------------------------------------------------------------
 
-    fun observePlaylists(allSongs: List<Song>): Flow<List<Playlist>> {
+    data class RawPlaylist(val id: Long, val name: String, val songIds: List<Long>)
+
+    fun observePlaylists(): Flow<List<RawPlaylist>> {
         return dao.observeAllPlaylists().map { entities ->
             entities.map { entity ->
-                val songIds = dao.getSongIdsForPlaylist(entity.id)
-                val songs = songIds.mapNotNull { id -> allSongs.find { it.id == id } }
-                Playlist(id = entity.id, name = entity.name, songs = songs)
+                RawPlaylist(
+                    id = entity.id,
+                    name = entity.name,
+                    songIds = dao.getSongIdsForPlaylist(entity.id)
+                )
             }
         }
     }

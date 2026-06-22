@@ -147,12 +147,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observePlaylists() {
         viewModelScope.launch {
-            repository.observePlaylists(_allSongs.value).collect { list ->
-                _userPlaylists.update { list }
+            repository.observePlaylists().collect { rawPlaylists ->
+                val resolved = rawPlaylists.map { raw ->
+                    Playlist(
+                        id = raw.id,
+                        name = raw.name,
+                        songs = raw.songIds.mapNotNull { songId ->
+                            _allSongs.value.find { it.id == songId }
+                        }
+                    )
+                }
+                _userPlaylists.update { resolved }
                 rebuildPlaylistList()
             }
         }
-        // Also rebuild when recentlyAdded updates
         viewModelScope.launch {
             _recentlyAdded.collect { rebuildPlaylistList() }
         }
@@ -194,6 +202,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (playlistId == RECENTLY_ADDED_ID) return
         viewModelScope.launch(Dispatchers.IO) {
             repository.removeSongFromPlaylist(playlistId, song.id)
+        }
+    }
+
+    //Remove / add multiple songs at once
+    fun removeSongsFromPlaylist(playlistId: Long, songs: Set<Song>) {
+        if (playlistId == RECENTLY_ADDED_ID) return
+        viewModelScope.launch(Dispatchers.IO) {
+            songs.forEach { song ->
+                repository.removeSongFromPlaylist(playlistId, song.id)
+            }
+        }
+    }
+
+    fun addSongsToPlaylist(playlistId: Long, songs: Set<Song>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            songs.forEach { song ->
+                repository.addSongToPlaylist(playlistId, song.id)
+            }
         }
     }
 
