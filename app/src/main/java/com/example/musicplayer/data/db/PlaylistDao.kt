@@ -42,4 +42,12 @@ interface PlaylistDao {
 
     @Query("SELECT MAX(position) FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun getMaxPosition(playlistId: Long): Int?
+
+    @Query("""
+    SELECT ps.playlistId, ps.songId, ps.position
+    FROM playlist_songs ps
+    ORDER BY ps.playlistId, ps.position ASC
+""")
+    fun observeAllPlaylistSongs(): Flow<List<PlaylistSongEntity>>
 }
+

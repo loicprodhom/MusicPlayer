@@ -137,7 +137,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _userPlaylists = MutableStateFlow<List<Playlist>>(emptyList())
 
-    // What the UI sees: Recently Added always first, then user playlists
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
 
@@ -147,11 +146,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observePlaylists() {
         viewModelScope.launch {
-            repository.observePlaylists().collect { rawPlaylists ->
-                val resolved = rawPlaylists.map { raw ->
+            // observePlaylists() now returns RawPlaylist(id, name, songIds).
+            // We resolve songIds against _allSongs.value INSIDE the collect lambda,
+            // so every Room emission uses the current song list — never a stale snapshot.
+            repository.observePlaylists().collect { rawList ->
+                val resolved = rawList.map { raw ->
                     Playlist(
-                        id = raw.id,
-                        name = raw.name,
+                        id    = raw.id,
+                        name  = raw.name,
                         songs = raw.songIds.mapNotNull { songId ->
                             _allSongs.value.find { it.id == songId }
                         }
@@ -170,24 +172,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) { repository.createPlaylist(name) }
     }
 
-    /**
-     * Creates a new playlist and immediately adds the given songs to it.
-     * This avoids the race condition of creating a playlist and then trying
-     * to look up its ID from the Flow before the DB has emitted.
-     */
     fun createPlaylistAndAdd(name: String, songs: Set<Song>) {
         viewModelScope.launch(Dispatchers.IO) {
-            val newId = repository.createPlaylist(name)   // returns the new row ID
-            songs.forEach { song ->
-                repository.addSongToPlaylist(newId, song.id)
-            }
-            // The observePlaylists() Flow will emit automatically with the new playlist
-            // already populated, so no manual state update is needed here.
+            val newId = repository.createPlaylist(name)
+            songs.forEach { song -> repository.addSongToPlaylist(newId, song.id) }
         }
     }
 
     fun deletePlaylist(playlistId: Long) {
-        if (playlistId == RECENTLY_ADDED_ID) return  // protect synthetic playlist
+        if (playlistId == RECENTLY_ADDED_ID) return
         viewModelScope.launch(Dispatchers.IO) { repository.deletePlaylist(playlistId) }
     }
 
@@ -198,6 +191,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addSongsToPlaylist(playlistId: Long, songs: Set<Song>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            songs.forEach { song -> repository.addSongToPlaylist(playlistId, song.id) }
+        }
+    }
+
     fun removeSongFromPlaylist(playlistId: Long, song: Song) {
         if (playlistId == RECENTLY_ADDED_ID) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -205,21 +204,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    //Remove / add multiple songs at once
     fun removeSongsFromPlaylist(playlistId: Long, songs: Set<Song>) {
         if (playlistId == RECENTLY_ADDED_ID) return
         viewModelScope.launch(Dispatchers.IO) {
-            songs.forEach { song ->
-                repository.removeSongFromPlaylist(playlistId, song.id)
-            }
-        }
-    }
-
-    fun addSongsToPlaylist(playlistId: Long, songs: Set<Song>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            songs.forEach { song ->
-                repository.addSongToPlaylist(playlistId, song.id)
-            }
+            songs.forEach { song -> repository.removeSongFromPlaylist(playlistId, song.id) }
         }
     }
 

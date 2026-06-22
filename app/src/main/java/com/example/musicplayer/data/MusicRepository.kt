@@ -11,41 +11,36 @@ import com.example.musicplayer.data.db.MusicDatabase
 import com.example.musicplayer.data.db.PlaylistEntity
 import com.example.musicplayer.data.db.PlaylistSongEntity
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+
+// Raw playlist data — song resolution happens in the ViewModel where
+// _allSongs is always current, not here where it would be stale.
+data class RawPlaylist(val id: Long, val name: String, val songIds: List<Long>)
 
 class MusicRepository(private val context: Context) {
 
     private val dao = MusicDatabase.getInstance(context).playlistDao()
 
     // -------------------------------------------------------------------------
-    // MediaStore observer — fires onChanged() when audio files are added/removed
+    // MediaStore observer
     // -------------------------------------------------------------------------
 
     private var mediaObserver: ContentObserver? = null
 
-    /**
-     * Register a ContentObserver so the ViewModel can reload songs automatically
-     * when the device's audio library changes (new downloads, imports, deletions).
-     * Call unregisterObserver() in ViewModel.onCleared().
-     */
     fun registerMediaObserver(onChange: () -> Unit) {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                onChange()
-            }
+            override fun onChange(selfChange: Boolean) = onChange()
         }
         context.contentResolver.registerContentObserver(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            /* notifyForDescendants = */ true,
+            true,
             observer
         )
         mediaObserver = observer
     }
 
     fun unregisterObserver() {
-        mediaObserver?.let {
-            context.contentResolver.unregisterContentObserver(it)
-        }
+        mediaObserver?.let { context.contentResolver.unregisterContentObserver(it) }
         mediaObserver = null
     }
 
@@ -53,26 +48,10 @@ class MusicRepository(private val context: Context) {
     // Songs — MediaStore
     // -------------------------------------------------------------------------
 
-    /**
-     * Returns all music files sorted alphabetically.
-     * Run on Dispatchers.IO — MediaStore queries block.
-     */
-    fun loadSongs(): List<Song> {
-        return querySongs(
-            sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
-        )
-    }
+    fun loadSongs(): List<Song> = querySongs("${MediaStore.Audio.Media.TITLE} ASC")
 
-    /**
-     * Returns the [limit] most recently added songs, newest first.
-     * Used to build the "Recently Added" synthetic playlist.
-     */
-    fun loadRecentlyAdded(limit: Int = 200): List<Song> {
-        return querySongs(
-            sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC",
-            limit = limit
-        )
-    }
+    fun loadRecentlyAdded(limit: Int = 200): List<Song> =
+        querySongs("${MediaStore.Audio.Media.DATE_ADDED} DESC", limit)
 
     private fun querySongs(sortOrder: String, limit: Int? = null): List<Song> {
         val songs = mutableListOf<Song>()
@@ -83,16 +62,13 @@ class MusicRepository(private val context: Context) {
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
-            MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATE_ADDED
+            MediaStore.Audio.Media.DURATION
         )
-
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
 
         context.contentResolver.query(
             collection,
             projection,
-            selection,
+            "${MediaStore.Audio.Media.IS_MUSIC} != 0",
             null,
             sortOrder
         )?.use { cursor ->
@@ -117,23 +93,30 @@ class MusicRepository(private val context: Context) {
                 count++
             }
         }
-
         return songs
     }
 
     // -------------------------------------------------------------------------
     // Playlists — Room
+    // Returns raw (id, name, songIds) — NO song resolution here.
+    // The ViewModel resolves against _allSongs.value on every emission.
     // -------------------------------------------------------------------------
 
-    data class RawPlaylist(val id: Long, val name: String, val songIds: List<Long>)
-
     fun observePlaylists(): Flow<List<RawPlaylist>> {
-        return dao.observeAllPlaylists().map { entities ->
+        // Combine both table flows so ANY change to playlists OR playlist_songs
+        // triggers a re-emission.
+        return dao.observeAllPlaylists().combine(dao.observeAllPlaylistSongs()) {
+                entities, songEntries ->
+            val songsByPlaylist = songEntries
+                .groupBy { it.playlistId }
+                .mapValues { (_, entries) ->
+                    entries.sortedBy { it.position }.map { it.songId }
+                }
             entities.map { entity ->
                 RawPlaylist(
-                    id = entity.id,
-                    name = entity.name,
-                    songIds = dao.getSongIdsForPlaylist(entity.id)
+                    id      = entity.id,
+                    name    = entity.name,
+                    songIds = songsByPlaylist[entity.id] ?: emptyList()
                 )
             }
         }
@@ -148,11 +131,7 @@ class MusicRepository(private val context: Context) {
     suspend fun addSongToPlaylist(playlistId: Long, songId: Long) {
         val nextPosition = (dao.getMaxPosition(playlistId) ?: -1) + 1
         dao.insertPlaylistSong(
-            PlaylistSongEntity(
-                playlistId = playlistId,
-                songId     = songId,
-                position   = nextPosition
-            )
+            PlaylistSongEntity(playlistId = playlistId, songId = songId, position = nextPosition)
         )
     }
 
