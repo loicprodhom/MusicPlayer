@@ -204,8 +204,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun removeSongsFromRecentlyAdded(songs: Set<Song>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            songs.forEach { song ->
+                repository.excludeSongFromRecentlyAdded(song.id)
+            }
+            // Refresh the playlist immediately so the UI updates
+            refreshRecentlyAdded()
+        }
+    }
+
     fun removeSongsFromPlaylist(playlistId: Long, songs: Set<Song>) {
-        if (playlistId == RECENTLY_ADDED_ID) return
         viewModelScope.launch(Dispatchers.IO) {
             songs.forEach { song -> repository.removeSongFromPlaylist(playlistId, song.id) }
         }

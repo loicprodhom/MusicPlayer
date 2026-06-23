@@ -121,24 +121,22 @@ fun PlaylistDetailScreen(
                         contentDescription = "Add to playlist"
                     )
                 }
-                // Remove from this playlist — hidden for Recently Added
-                if (!isRecentlyAdded) {
-                    IconButton(
-                        onClick = {
-                            onRemoveSongs(selectedSongs)
-                            exitSelectionMode()
-                        },
-                        enabled = selectedSongs.isNotEmpty()
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.baseline_delete_24),
-                            contentDescription = "Remove from playlist",
-                            tint = if (selectedSongs.isNotEmpty())
-                                MaterialTheme.colorScheme.error
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                // Remove from this playlist
+                IconButton(
+                    onClick = {
+                        onRemoveSongs(selectedSongs)
+                        exitSelectionMode()
+                    },
+                    enabled = selectedSongs.isNotEmpty()
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.baseline_delete_24),
+                        contentDescription = "Remove from playlist",
+                        tint = if (selectedSongs.isNotEmpty())
+                            MaterialTheme.colorScheme.error
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         } else {

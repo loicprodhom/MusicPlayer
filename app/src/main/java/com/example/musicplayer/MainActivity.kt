@@ -319,7 +319,11 @@ private fun AppNavHost(
                         }
                     },
                     onRemoveSongs = { songs ->
-                        viewModel.removeSongsFromPlaylist(it.id, songs)
+                        if (it.id == -1L) {
+                            viewModel.removeSongsFromRecentlyAdded(songs)
+                        } else {
+                            viewModel.removeSongsFromPlaylist(it.id, songs)
+                        }
                     },
                     onAddSongsToPlaylist = { songs, playlistId ->
                         viewModel.addSongsToPlaylist(playlistId, songs)

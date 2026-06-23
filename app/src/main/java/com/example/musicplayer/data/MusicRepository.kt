@@ -7,11 +7,13 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import com.example.musicplayer.data.db.ExcludedSongEntity
 import com.example.musicplayer.data.db.MusicDatabase
 import com.example.musicplayer.data.db.PlaylistEntity
 import com.example.musicplayer.data.db.PlaylistSongEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.runBlocking
 
 // Raw playlist data — song resolution happens in the ViewModel where
 // _allSongs is always current, not here where it would be stale.
@@ -20,6 +22,15 @@ data class RawPlaylist(val id: Long, val name: String, val songIds: List<Long>)
 class MusicRepository(private val context: Context) {
 
     private val dao = MusicDatabase.getInstance(context).playlistDao()
+
+    private val excludedDao = MusicDatabase.getInstance(context).excludedSongDao()
+
+    suspend fun excludeSongFromRecentlyAdded(songId: Long) {
+        excludedDao.excludeSong(ExcludedSongEntity(songId))
+    }
+
+    suspend fun getExcludedSongIds(): Set<Long> =
+        excludedDao.getAllExcludedIds().toSet()
 
     // -------------------------------------------------------------------------
     // MediaStore observer
@@ -51,7 +62,9 @@ class MusicRepository(private val context: Context) {
     fun loadSongs(): List<Song> = querySongs("${MediaStore.Audio.Media.TITLE} ASC")
 
     fun loadRecentlyAdded(limit: Int = 200): List<Song> =
-        querySongs("${MediaStore.Audio.Media.DATE_ADDED} DESC", limit)
+        querySongs("${MediaStore.Audio.Media.DATE_ADDED} DESC")
+            .filter { it.id !in runBlocking { getExcludedSongIds() } }
+            .take(limit)
 
     private fun querySongs(sortOrder: String, limit: Int? = null): List<Song> {
         val songs = mutableListOf<Song>()
