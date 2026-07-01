@@ -41,6 +41,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.android.material:material:1.14.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -50,9 +51,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation("androidx.media3:media3-exoplayer:1.9.2")
-    implementation("androidx.media3:media3-exoplayer-dash:1.9.2")
-    implementation("androidx.media3:media3-ui:1.9.2")
-    implementation("androidx.media3:media3-ui-compose:1.9.2")
+    implementation("androidx.media3:media3-exoplayer-dash:1.10.1")
+    implementation("androidx.media3:media3-ui:1.10.1")
+    implementation("androidx.media3:media3-ui-compose:1.10.1")
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     testImplementation(libs.junit)
@@ -63,8 +64,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     implementation(libs.androidx.activity.ktx)
-    implementation("androidx.media:media:1.7.0")
-    implementation("androidx.room:room-runtime:2.7.1")
-    implementation("androidx.room:room-ktx:2.7.1")        // for Flow and suspend support
+    implementation("androidx.media:media:1.8.0")
+    implementation("androidx.room:room-runtime:2.8.4")
+    implementation("androidx.room:room-ktx:2.8.4")        // for Flow and suspend support
     ksp("androidx.room:room-compiler:2.8.4")
 }
