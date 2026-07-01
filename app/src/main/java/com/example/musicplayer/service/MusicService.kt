@@ -12,6 +12,9 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import com.example.musicplayer.MainActivity
@@ -21,8 +24,7 @@ import com.example.musicplayer.data.Song
 class MusicService : Service() {
 
     // -------------------------------------------------------------------------
-    // Callback interface — ViewModel implements this instead of using broadcasts
-    // for time-critical events like song completion
+    // Callback interface
     // -------------------------------------------------------------------------
 
     interface Listener {
@@ -34,12 +36,16 @@ class MusicService : Service() {
     private var mediaPlayer: MediaPlayer? = null
     private var currentSong: Song? = null
     private val handler = Handler(Looper.getMainLooper())
-
-    // Set by the ViewModel once the service is bound
-    var listener: Listener? = null
-
     private var isPreparing = false
     private var pendingSeekMs: Int? = null
+
+    var listener: Listener? = null
+
+    // -------------------------------------------------------------------------
+    // MediaSession — drives lock screen controls
+    // -------------------------------------------------------------------------
+
+    private lateinit var mediaSession: MediaSessionCompat
 
     inner class MusicBinder : Binder() {
         fun getService(): MusicService = this@MusicService
@@ -50,12 +56,70 @@ class MusicService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        setupMediaSession()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
+        mediaSession.release()
         releasePlayer()
+    }
+
+    // -------------------------------------------------------------------------
+    // MediaSession setup
+    // -------------------------------------------------------------------------
+
+    @Suppress("DEPRECATION")
+    private fun setupMediaSession() {
+        mediaSession = MediaSessionCompat(this, "MusicPlayerSession").apply {
+            // Handle lock screen / Bluetooth / headset button actions
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay()     { resume() }
+                override fun onPause()    { pause() }
+                override fun onSkipToNext()     { sendBroadcast(Intent(ACTION_NEXT)) }
+                override fun onSkipToPrevious() { sendBroadcast(Intent(ACTION_PREVIOUS)) }
+                override fun onSeekTo(pos: Long) { seekTo(pos.toInt()) }
+                override fun onStop()     { stop() }
+            })
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                        MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            isActive = true
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun updateMediaSessionMetadata(song: Song) {
+        mediaSession.setMetadata(
+            MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, song.title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, song.artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, song.album)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, song.duration)
+                .build()
+        )
+    }
+
+    @Suppress("DEPRECATION")
+    private fun updatePlaybackState(isPlaying: Boolean, positionMs: Long = 0L) {
+        val state = if (isPlaying) PlaybackStateCompat.STATE_PLAYING
+        else PlaybackStateCompat.STATE_PAUSED
+        mediaSession.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setState(state, positionMs, 1f)
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY or
+                            PlaybackStateCompat.ACTION_PAUSE or
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackStateCompat.ACTION_SEEK_TO or
+                            PlaybackStateCompat.ACTION_STOP
+                )
+                .build()
+        )
     }
 
     // -------------------------------------------------------------------------
@@ -70,23 +134,27 @@ class MusicService : Service() {
         handler.post { oldPlayer?.release() }
 
         isPreparing = true
+        updateMediaSessionMetadata(song)
+        updatePlaybackState(isPlaying = false)
 
         mediaPlayer = MediaPlayer().apply {
             setDataSource(applicationContext, song.uri)
             setOnPreparedListener { mp ->
                 isPreparing = false
-                // Apply any seek that arrived during preparation
                 pendingSeekMs?.let { mp.seekTo(it) }
                 pendingSeekMs = null
                 mp.start()
+                updatePlaybackState(isPlaying = true, positionMs = 0L)
                 startForeground(NOTIFICATION_ID, buildNotification(song, isPlaying = true))
             }
             setOnCompletionListener {
+                updatePlaybackState(isPlaying = false)
                 handler.post { listener?.onSongCompleted() }
             }
             setOnErrorListener { _, _, _ ->
                 isPreparing = false
                 pendingSeekMs = null
+                updatePlaybackState(isPlaying = false)
                 handler.post { listener?.onPlaybackError() }
                 true
             }
@@ -98,31 +166,42 @@ class MusicService : Service() {
 
     fun pause() {
         mediaPlayer?.pause()
+        updatePlaybackState(
+            isPlaying = false,
+            positionMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
+        )
         currentSong?.let { updateNotification(it, isPlaying = false) }
     }
 
     fun resume() {
         mediaPlayer?.start()
+        updatePlaybackState(
+            isPlaying = true,
+            positionMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
+        )
         currentSong?.let { updateNotification(it, isPlaying = true) }
     }
 
     fun stop() {
         stopForeground(STOP_FOREGROUND_REMOVE)
+        updatePlaybackState(isPlaying = false)
         releasePlayer()
     }
 
     fun seekTo(positionMs: Int) {
         if (isPreparing) {
-            pendingSeekMs = positionMs   // defer until onPrepared
+            pendingSeekMs = positionMs
         } else {
             mediaPlayer?.seekTo(positionMs)
+            updatePlaybackState(
+                isPlaying = mediaPlayer?.isPlaying == true,
+                positionMs = positionMs.toLong()
+            )
         }
     }
 
     fun isPlaying(): Boolean = mediaPlayer?.isPlaying == true
-
     fun getCurrentPosition(): Int = mediaPlayer?.currentPosition ?: 0
-
     fun getDuration(): Int = mediaPlayer?.duration ?: 0
 
     private fun releasePlayer() {
@@ -181,7 +260,11 @@ class MusicService : Service() {
             .addAction(R.drawable.baseline_skip_previous_24, "Previous", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "Pause" else "Play", toggleIntent)
             .addAction(R.drawable.baseline_skip_next_24, "Next", nextIntent)
-            .setStyle(MediaStyle().setShowActionsInCompactView(0, 1, 2))
+            .setStyle(
+                MediaStyle()
+                    .setShowActionsInCompactView(0, 1, 2)
+                    .setMediaSession(mediaSession.sessionToken)  // ← links to lock screen
+            )
             .build()
     }
 
@@ -191,7 +274,7 @@ class MusicService : Service() {
     }
 
     // -------------------------------------------------------------------------
-    // Constants — only broadcast actions remain here; completion uses listener
+    // Constants
     // -------------------------------------------------------------------------
 
     companion object {
