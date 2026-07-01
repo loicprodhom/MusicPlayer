@@ -29,7 +29,7 @@ import kotlinx.coroutines.withContext
 private const val RECENTLY_ADDED_ID = -1L
 private const val RECENTLY_ADDED_LIMIT = 200
 
-class MusicViewModel(application: Application) : AndroidViewModel(application) {
+class MusicViewModel(application: Application) : AndroidViewModel(application), MusicService.Listener {
 
     private val repository = MusicRepository(application)
     private var musicService: MusicService? = null
@@ -41,11 +41,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val playbackReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                MusicService.ACTION_TOGGLE_PLAYBACK    -> togglePlayPause()
-                MusicService.ACTION_PREVIOUS           -> skipToPrevious()
-                MusicService.ACTION_NEXT               -> skipToNext()
-                MusicService.ACTION_SONG_COMPLETED     -> onSongCompleted()
-                MusicService.ACTION_PLAYBACK_ERROR     -> onPlaybackError()
+                MusicService.ACTION_TOGGLE_PLAYBACK -> togglePlayPause()
+                MusicService.ACTION_PREVIOUS        -> skipToPrevious()
+                MusicService.ACTION_NEXT            -> skipToNext()
             }
         }
     }
@@ -75,6 +73,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onServiceConnected(service: MusicService) {
         musicService = service
+        service.listener = this          // register direct callback
         registerReceiver()
         if (_hasPermission.value) loadSongs()
     }
@@ -384,30 +383,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun onSongCompleted() {
-        when (_repeatMode.value) {
-            RepeatMode.REPEAT_ONE -> {
-                _currentSong.value?.let { startPlayback(it) }
-            }
-            RepeatMode.REPEAT_ALL -> {
-                val queue = activeQueue
-                val next = _queueIndex.value + 1
-                if (next < queue.size) {
-                    _queueIndex.update { next }
-                    startPlayback(queue[next])
-                } else {
-                    // End of queue — loop back to start
-                    if (_shuffleEnabled.value) {
-                        buildShuffledQueue(preserveCurrent = false)
-                    }
-                    _queueIndex.update { 0 }
-                    activeQueue.getOrNull(0)?.let { startPlayback(it) }
+    override fun onSongCompleted() {
+        // Called directly from MusicService via the Listener interface.
+        // Runs on the main thread (service posts it via handler.post).
+        viewModelScope.launch {
+            when (_repeatMode.value) {
+                RepeatMode.REPEAT_ONE -> {
+                    _currentSong.value?.let { startPlayback(it) }
                 }
-            }
-            RepeatMode.OFF -> {
-                advanceQueue()
+                RepeatMode.REPEAT_ALL -> {
+                    val queue = activeQueue
+                    val next = _queueIndex.value + 1
+                    if (next < queue.size) {
+                        _queueIndex.update { next }
+                        startPlayback(queue[next])
+                    } else {
+                        if (_shuffleEnabled.value) buildShuffledQueue(preserveCurrent = false)
+                        _queueIndex.update { 0 }
+                        activeQueue.getOrNull(0)?.let { startPlayback(it) }
+                    }
+                }
+                RepeatMode.OFF -> advanceQueue()
             }
         }
+    }
+
+    override fun onPlaybackError() {
+        _isPlaying.update { false }
+        stopProgressPolling()
     }
 
     /** Move to the next song, stopping at end of queue if repeat is off. */
@@ -431,11 +434,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _currentSong.update { song }
         _isPlaying.update { true }
         startProgressPolling()
-    }
-
-    private fun onPlaybackError() {
-        _isPlaying.update { false }
-        stopProgressPolling()
     }
 
     // -------------------------------------------------------------------------
@@ -475,8 +473,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             addAction(MusicService.ACTION_TOGGLE_PLAYBACK)
             addAction(MusicService.ACTION_PREVIOUS)
             addAction(MusicService.ACTION_NEXT)
-            addAction(MusicService.ACTION_SONG_COMPLETED)
-            addAction(MusicService.ACTION_PLAYBACK_ERROR)
+            // Completion and error now go through MusicService.Listener directly
         }
         ContextCompat.registerReceiver(
             getApplication(),
@@ -494,6 +491,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         stopProgressPolling()
+        musicService?.listener = null    // avoid leaking the ViewModel
         repository.unregisterObserver()
         getApplication<Application>().unregisterReceiver(playbackReceiver)
     }

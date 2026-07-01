@@ -9,7 +9,9 @@ import android.content.Intent
 import android.media.MediaPlayer
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import com.example.musicplayer.MainActivity
@@ -18,9 +20,26 @@ import com.example.musicplayer.data.Song
 
 class MusicService : Service() {
 
+    // -------------------------------------------------------------------------
+    // Callback interface — ViewModel implements this instead of using broadcasts
+    // for time-critical events like song completion
+    // -------------------------------------------------------------------------
+
+    interface Listener {
+        fun onSongCompleted()
+        fun onPlaybackError()
+    }
+
     private val binder = MusicBinder()
     private var mediaPlayer: MediaPlayer? = null
     private var currentSong: Song? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Set by the ViewModel once the service is bound
+    var listener: Listener? = null
+
+    private var isPreparing = false
+    private var pendingSeekMs: Int? = null
 
     inner class MusicBinder : Binder() {
         fun getService(): MusicService = this@MusicService
@@ -35,6 +54,7 @@ class MusicService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        handler.removeCallbacksAndMessages(null)
         releasePlayer()
     }
 
@@ -43,19 +63,31 @@ class MusicService : Service() {
     // -------------------------------------------------------------------------
 
     fun play(song: Song) {
-        releasePlayer()
+        val oldPlayer = mediaPlayer
+        mediaPlayer = null
+        isPreparing = false
+        pendingSeekMs = null
+        handler.post { oldPlayer?.release() }
+
+        isPreparing = true
 
         mediaPlayer = MediaPlayer().apply {
             setDataSource(applicationContext, song.uri)
             setOnPreparedListener { mp ->
+                isPreparing = false
+                // Apply any seek that arrived during preparation
+                pendingSeekMs?.let { mp.seekTo(it) }
+                pendingSeekMs = null
                 mp.start()
                 startForeground(NOTIFICATION_ID, buildNotification(song, isPlaying = true))
             }
             setOnCompletionListener {
-                sendBroadcast(Intent(ACTION_SONG_COMPLETED))
+                handler.post { listener?.onSongCompleted() }
             }
             setOnErrorListener { _, _, _ ->
-                sendBroadcast(Intent(ACTION_PLAYBACK_ERROR))
+                isPreparing = false
+                pendingSeekMs = null
+                handler.post { listener?.onPlaybackError() }
                 true
             }
             prepareAsync()
@@ -64,23 +96,14 @@ class MusicService : Service() {
         currentSong = song
     }
 
-    private fun onPlayerPrepared(song: Song) {
-        startForeground(NOTIFICATION_ID, buildNotification(song, isPlaying = true))
-    }
-
     fun pause() {
         mediaPlayer?.pause()
-        currentSong?.let {
-            // Update notification to show play button instead of pause
-            updateNotification(it, isPlaying = false)
-        }
+        currentSong?.let { updateNotification(it, isPlaying = false) }
     }
 
     fun resume() {
         mediaPlayer?.start()
-        currentSong?.let {
-            updateNotification(it, isPlaying = true)
-        }
+        currentSong?.let { updateNotification(it, isPlaying = true) }
     }
 
     fun stop() {
@@ -89,7 +112,11 @@ class MusicService : Service() {
     }
 
     fun seekTo(positionMs: Int) {
-        mediaPlayer?.seekTo(positionMs)
+        if (isPreparing) {
+            pendingSeekMs = positionMs   // defer until onPrepared
+        } else {
+            mediaPlayer?.seekTo(positionMs)
+        }
     }
 
     fun isPlaying(): Boolean = mediaPlayer?.isPlaying == true
@@ -112,85 +139,68 @@ class MusicService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Music Playback",
-                NotificationManager.IMPORTANCE_LOW  // low = no sound, still visible
-            ).apply {
-                description = "Shows the currently playing song"
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Shows the currently playing song" }
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
         }
     }
 
     private fun buildNotification(song: Song, isPlaying: Boolean): Notification {
-        // Tapping the notification reopens the app
         val openAppIntent = PendingIntent.getActivity(
-            this,
-            0,
+            this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
-        // Pause / Play action
         val toggleIntent = PendingIntent.getBroadcast(
-            this,
-            0,
+            this, 0,
             Intent(ACTION_TOGGLE_PLAYBACK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
-        // Previous action
         val prevIntent = PendingIntent.getBroadcast(
-            this,
-            1,
+            this, 1,
             Intent(ACTION_PREVIOUS),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
-        // Next action
         val nextIntent = PendingIntent.getBroadcast(
-            this,
-            2,
+            this, 2,
             Intent(ACTION_NEXT),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val playPauseIcon = if (isPlaying) R.drawable.pause else R.drawable.play_arrow
+        val playPauseIcon = if (isPlaying) R.drawable.baseline_pause_24
+        else R.drawable.baseline_play_arrow_24
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(song.title)
             .setContentText(song.artist)
-            .setSmallIcon(R.drawable.music_note)
+            .setSmallIcon(R.drawable.baseline_music_note_24)
             .setContentIntent(openAppIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
-            .addAction(R.drawable.skip_previous, "Previous", prevIntent)
+            .addAction(R.drawable.baseline_skip_previous_24, "Previous", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "Pause" else "Play", toggleIntent)
-            .addAction(R.drawable.skip_next, "Next", nextIntent)
-            .setStyle(
-                MediaStyle()
-                    .setShowActionsInCompactView(0, 1, 2) // prev, toggle, next
-            )
+            .addAction(R.drawable.baseline_skip_next_24, "Next", nextIntent)
+            .setStyle(MediaStyle().setShowActionsInCompactView(0, 1, 2))
             .build()
     }
 
     private fun updateNotification(song: Song, isPlaying: Boolean) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(song, isPlaying))
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildNotification(song, isPlaying))
     }
 
     // -------------------------------------------------------------------------
-    // Constants
+    // Constants — only broadcast actions remain here; completion uses listener
     // -------------------------------------------------------------------------
 
     companion object {
         const val CHANNEL_ID = "music_playback_channel"
         const val NOTIFICATION_ID = 1
 
-        // Broadcast actions — MusicViewModel should register a receiver for these
         const val ACTION_TOGGLE_PLAYBACK = "com.example.musicplayer.TOGGLE_PLAYBACK"
         const val ACTION_PREVIOUS        = "com.example.musicplayer.PREVIOUS"
         const val ACTION_NEXT            = "com.example.musicplayer.NEXT"
-        const val ACTION_SONG_COMPLETED  = "com.example.musicplayer.SONG_COMPLETED"
-        const val ACTION_PLAYBACK_ERROR   = "com.example.musicplayer.PLAYBACK_ERROR"
+        const val ACTION_PLAYBACK_ERROR  = "com.example.musicplayer.PLAYBACK_ERROR"
     }
 }
