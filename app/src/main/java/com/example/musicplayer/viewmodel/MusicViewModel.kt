@@ -413,6 +413,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         stopProgressPolling()
     }
 
+    override fun onSkipToNext() {
+        skipToNext()
+    }
+
+    override fun onSkipToPrevious() {
+        skipToPrevious()
+    }
+
     /** Move to the next song, stopping at end of queue if repeat is off. */
     private fun advanceQueue() {
         val queue = activeQueue

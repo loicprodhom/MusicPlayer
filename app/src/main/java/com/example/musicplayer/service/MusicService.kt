@@ -30,6 +30,8 @@ class MusicService : Service() {
     interface Listener {
         fun onSongCompleted()
         fun onPlaybackError()
+        fun onSkipToNext()
+        fun onSkipToPrevious()
     }
 
     private val binder = MusicBinder()
@@ -75,12 +77,18 @@ class MusicService : Service() {
         mediaSession = MediaSessionCompat(this, "MusicPlayerSession").apply {
             // Handle lock screen / Bluetooth / headset button actions
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay()     { resume() }
-                override fun onPause()    { pause() }
-                override fun onSkipToNext()     { sendBroadcast(Intent(ACTION_NEXT)) }
-                override fun onSkipToPrevious() { sendBroadcast(Intent(ACTION_PREVIOUS)) }
+                override fun onPlay()  { resume() }
+                override fun onPause() { pause() }
+                override fun onStop()  { stop() }
                 override fun onSeekTo(pos: Long) { seekTo(pos.toInt()) }
-                override fun onStop()     { stop() }
+
+                override fun onSkipToNext() {
+                    listener?.onSkipToNext()
+                }
+
+                override fun onSkipToPrevious() {
+                    listener?.onSkipToPrevious()
+                }
             })
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
