@@ -7,7 +7,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.example.musicplayer.R
@@ -106,10 +105,10 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 IconButton(onClick = onPrevious) {
-                    Image(painterResource(R.drawable.baseline_skip_previous_24), "Previous")
+                    Icon(painterResource(R.drawable.baseline_skip_previous_24), "Previous")
                 }
                 FilledIconButton(onClick = onPlayPause, modifier = Modifier.size(64.dp)) {
-                    Image(
+                    Icon(
                         painter = painterResource(
                             if (isPlaying) R.drawable.baseline_pause_24
                             else R.drawable.baseline_play_arrow_24
@@ -118,7 +117,7 @@ fun NowPlayingScreen(
                     )
                 }
                 IconButton(onClick = onNext) {
-                    Image(painterResource(R.drawable.baseline_skip_next_24), "Next")
+                    Icon(painterResource(R.drawable.baseline_skip_next_24), "Next")
                 }
             }
 
@@ -131,27 +130,27 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 IconButton(onClick = onToggleShuffle) {
-                    Image(
+                    Icon(
                         painter = painterResource(R.drawable.baseline_shuffle_24),
                         contentDescription = "Shuffle",
-                        colorFilter = ColorFilter.tint(
-                            if (shuffleEnabled) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        tint = if (shuffleEnabled)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 IconButton(onClick = onCycleRepeat) {
-                    Image(
+                    Icon(
                         painter = painterResource(
                             if (repeatMode == RepeatMode.REPEAT_ONE)
                                 R.drawable.baseline_repeat_one_24
                             else R.drawable.baseline_repeat_24
                         ),
                         contentDescription = "Repeat",
-                        colorFilter = ColorFilter.tint(
-                            if (repeatMode != RepeatMode.OFF) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        tint = if (repeatMode != RepeatMode.OFF)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
