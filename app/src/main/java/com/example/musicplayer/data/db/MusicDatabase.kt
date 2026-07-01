@@ -9,9 +9,9 @@ import androidx.room.RoomDatabase
     entities = [
         PlaylistEntity::class,
         PlaylistSongEntity::class,
-        ExcludedSongEntity::class    // ← add this
+        ExcludedSongEntity::class
     ],
-    version = 2,                     // ← bump from 1 to 2
+    version = 3,
     exportSchema = false
 )
 abstract class MusicDatabase : RoomDatabase() {
@@ -30,7 +30,7 @@ abstract class MusicDatabase : RoomDatabase() {
                     MusicDatabase::class.java,
                     "music_player.db"
                 )
-                    .addMigrations(MIGRATION_1_2)    // ← add this
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build().also { INSTANCE = it }
             }
         }
@@ -40,6 +40,14 @@ abstract class MusicDatabase : RoomDatabase() {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS excluded_songs (songId INTEGER NOT NULL, PRIMARY KEY(songId))"
+                )
+            }
+        }
+
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE playlists ADD COLUMN sortOrder TEXT NOT NULL DEFAULT 'DEFAULT'"
                 )
             }
         }

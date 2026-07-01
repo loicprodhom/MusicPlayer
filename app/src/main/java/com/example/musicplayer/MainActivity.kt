@@ -301,8 +301,8 @@ private fun AppNavHost(
                     playlist = it,
                     currentSong = currentSong,
                     allPlaylists = playlists,
-                    onPlayAll = {
-                        viewModel.playPlaylist(it)
+                    onPlayAll = { sortedSongs ->
+                        viewModel.playSongInContext(sortedSongs.first(), sortedSongs)
                         navController.navigate(Screen.NowPlaying.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true
@@ -310,6 +310,9 @@ private fun AppNavHost(
                             launchSingleTop = true
                             restoreState = true
                         }
+                    },
+                    onSortOrderChanged = { sortOrder ->
+                        viewModel.updatePlaylistSortOrder(it.id, sortOrder)
                     },
                     onSongClick = { song ->
                         viewModel.playSongInContext(song, it.songs)

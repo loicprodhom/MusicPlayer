@@ -1,7 +1,6 @@
 package com.example.musicplayer.ui.playlistdetail
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,25 +13,41 @@ import androidx.compose.ui.unit.dp
 import com.example.musicplayer.R
 import com.example.musicplayer.data.Playlist
 import com.example.musicplayer.data.Song
+import com.example.musicplayer.data.SortOrder
 import com.example.musicplayer.ui.components.CreatePlaylistDialog
 import com.example.musicplayer.ui.library.SongRow
 
 private const val RECENTLY_ADDED_ID = -1L
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistDetailScreen(
     playlist: Playlist,
     currentSong: Song?,
     allPlaylists: List<Playlist>,
-    onPlayAll: () -> Unit,
+    onPlayAll: (List<Song>) -> Unit,
     onSongClick: (Song) -> Unit,
     onRemoveSongs: (Set<Song>) -> Unit,
     onAddSongsToPlaylist: (songs: Set<Song>, playlistId: Long) -> Unit,
     onCreatePlaylistAndAdd: (name: String, songs: Set<Song>) -> Unit,
+    onSortOrderChanged: (SortOrder) -> Unit,
     onDeletePlaylist: () -> Unit,
     onBack: () -> Unit
 ) {
     val isRecentlyAdded = playlist.id == RECENTLY_ADDED_ID
+
+    // Sort order — seeded from the playlist's persisted value, reset when
+    // navigating to a different playlist
+    var sortOrder by remember(playlist.id) { mutableStateOf(playlist.sortOrder) }
+
+    // Apply sort locally — does not mutate the playlist itself
+    val displayedSongs = remember(playlist.songs, sortOrder) {
+        when (sortOrder) {
+            SortOrder.DEFAULT        -> playlist.songs
+            SortOrder.ALPHABETICAL   -> playlist.songs.sortedBy { it.title.lowercase() }
+            SortOrder.DATE_ASCENDING -> playlist.songs.sortedBy { it.dateAdded  }
+        }
+    }
 
     var selectionMode by remember { mutableStateOf(false) }
     var selectedSongs by remember { mutableStateOf(setOf<Song>()) }
@@ -44,7 +59,7 @@ fun PlaylistDetailScreen(
         selectedSongs = emptySet()
     }
 
-    // Delete playlist confirmation
+    // ── Delete playlist confirmation ──────────────────────────────────────────
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -65,7 +80,7 @@ fun PlaylistDetailScreen(
         )
     }
 
-    // Playlist picker for adding selected songs to another playlist
+    // ── Playlist picker ───────────────────────────────────────────────────────
     if (showPlaylistPicker) {
         val songsToAdd = selectedSongs
         PlaylistPickerDialog(
@@ -87,7 +102,7 @@ fun PlaylistDetailScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ── App bar ──────────────────────────────────────────────────────────
+        // ── App bar ───────────────────────────────────────────────────────────
         if (selectionMode) {
             // Selection mode bar
             Row(
@@ -105,13 +120,14 @@ fun PlaylistDetailScreen(
                 Text(
                     text = "${selectedSongs.size} selected",
                     style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f).padding(start = 4.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp)
                 )
-                // Select all
-                TextButton(onClick = { selectedSongs = playlist.songs.toSet() }) {
-                    Text("All (${playlist.songs.size})")
+                TextButton(onClick = { selectedSongs = displayedSongs.toSet() }) {
+                    Text("All (${displayedSongs.size})")
                 }
-                // Add to playlist
+                // Add to another playlist
                 IconButton(
                     onClick = { showPlaylistPicker = true },
                     enabled = selectedSongs.isNotEmpty()
@@ -121,22 +137,24 @@ fun PlaylistDetailScreen(
                         contentDescription = "Add to playlist"
                     )
                 }
-                // Remove from this playlist
-                IconButton(
-                    onClick = {
-                        onRemoveSongs(selectedSongs)
-                        exitSelectionMode()
-                    },
-                    enabled = selectedSongs.isNotEmpty()
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.baseline_delete_24),
-                        contentDescription = "Remove from playlist",
-                        tint = if (selectedSongs.isNotEmpty())
-                            MaterialTheme.colorScheme.error
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                // Remove — hidden for Recently Added
+                if (!isRecentlyAdded) {
+                    IconButton(
+                        onClick = {
+                            onRemoveSongs(selectedSongs)
+                            exitSelectionMode()
+                        },
+                        enabled = selectedSongs.isNotEmpty()
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_delete_24),
+                            contentDescription = "Remove from playlist",
+                            tint = if (selectedSongs.isNotEmpty())
+                                MaterialTheme.colorScheme.error
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         } else {
@@ -158,6 +176,46 @@ fun PlaylistDetailScreen(
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f)
                 )
+
+                // Sort alphabetically — hidden for Recently Added
+                if (!isRecentlyAdded) {
+                    IconButton(onClick = {
+                        val next = if (sortOrder == SortOrder.ALPHABETICAL)
+                            SortOrder.DEFAULT else SortOrder.ALPHABETICAL
+                        sortOrder = next
+                        onSortOrderChanged(next)
+                    }) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_sort_by_alpha_24),
+                            contentDescription = "Sort alphabetically",
+                            tint = if (sortOrder == SortOrder.ALPHABETICAL)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Sort by date (oldest first) hidden for recently added
+                if (!isRecentlyAdded) {
+                    IconButton(onClick = {
+                        val next = if (sortOrder == SortOrder.DATE_ASCENDING)
+                            SortOrder.DEFAULT else SortOrder.DATE_ASCENDING
+                        sortOrder = next
+                        onSortOrderChanged(next)
+                    }) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_access_time_24),
+                            contentDescription = "Sort by date",
+                            tint = if (sortOrder == SortOrder.DATE_ASCENDING)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Delete — hidden for Recently Added
                 if (!isRecentlyAdded) {
                     IconButton(onClick = { showDeleteConfirm = true }) {
                         Icon(
@@ -170,11 +228,11 @@ fun PlaylistDetailScreen(
             }
         }
 
-        // ── Play All button ──────────────────────────────────────────────────
+        // ── Play All ──────────────────────────────────────────────────────────
         if (!selectionMode) {
             Button(
-                onClick = onPlayAll,
-                enabled = playlist.songs.isNotEmpty(),
+                onClick = { onPlayAll(displayedSongs) },
+                enabled = displayedSongs.isNotEmpty(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -183,10 +241,12 @@ fun PlaylistDetailScreen(
             }
         }
 
-        // ── Song list ────────────────────────────────────────────────────────
-        if (playlist.songs.isEmpty()) {
+        // ── Song list ─────────────────────────────────────────────────────────
+        if (displayedSongs.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(32.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -197,7 +257,7 @@ fun PlaylistDetailScreen(
             }
         } else {
             LazyColumn {
-                items(playlist.songs) { song ->
+                items(displayedSongs) { song ->
                     SongRow(
                         song = song,
                         isCurrentlyPlaying = song == currentSong,
@@ -242,7 +302,6 @@ private fun PlaylistPickerDialog(
     onCreateNewPlaylist: (name: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Exclude Recently Added and the current playlist itself
     val targetPlaylists = playlists.filter {
         it.id != RECENTLY_ADDED_ID && it.id != currentPlaylistId
     }
@@ -275,7 +334,6 @@ private fun PlaylistPickerDialog(
                         Text("New playlist", style = MaterialTheme.typography.bodyLarge)
                         Spacer(Modifier.weight(1f))
                     }
-
                     if (targetPlaylists.isNotEmpty()) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                         targetPlaylists.forEach { playlist ->

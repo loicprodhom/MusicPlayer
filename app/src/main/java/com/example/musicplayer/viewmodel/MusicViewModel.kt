@@ -14,6 +14,7 @@ import com.example.musicplayer.data.MusicRepository
 import com.example.musicplayer.data.Playlist
 import com.example.musicplayer.data.RepeatMode
 import com.example.musicplayer.data.Song
+import com.example.musicplayer.data.SortOrder
 import com.example.musicplayer.service.MusicService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,6 +29,7 @@ import kotlinx.coroutines.withContext
 // Sentinel playlist ID for the synthetic "Recently Added" playlist
 private const val RECENTLY_ADDED_ID = -1L
 private const val RECENTLY_ADDED_LIMIT = 200
+
 
 class MusicViewModel(application: Application) : AndroidViewModel(application), MusicService.Listener {
 
@@ -153,6 +155,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
                     Playlist(
                         id    = raw.id,
                         name  = raw.name,
+                        sortOrder = raw.sortOrder,
                         songs = raw.songIds.mapNotNull { songId ->
                             _allSongs.value.find { it.id == songId }
                         }
@@ -175,6 +178,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         viewModelScope.launch(Dispatchers.IO) {
             val newId = repository.createPlaylist(name)
             songs.forEach { song -> repository.addSongToPlaylist(newId, song.id) }
+        }
+    }
+
+    fun updatePlaylistSortOrder(playlistId: Long, sortOrder: SortOrder) {
+        if (playlistId == RECENTLY_ADDED_ID) return
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updatePlaylistSortOrder(playlistId, sortOrder)
         }
     }
 
