@@ -282,6 +282,17 @@ class MusicService : Service() {
     }
 
     // -------------------------------------------------------------------------
+    // Cleanup
+    // -------------------------------------------------------------------------
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        mediaSession.isActive = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
 

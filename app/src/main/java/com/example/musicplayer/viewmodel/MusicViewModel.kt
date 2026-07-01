@@ -314,6 +314,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         startPlayback(song)
     }
 
+    fun playSongInContext(song: Song, queue: List<Song>) {
+        _queue.update { queue }
+        if (_shuffleEnabled.value) {
+            buildShuffledQueue(preserveCurrent = false)
+            val shuffled = _shuffledQueue.value.toMutableList()
+            shuffled.remove(song)
+            _shuffledQueue.update { listOf(song) + shuffled }
+            _queueIndex.update { 0 }
+        } else {
+            _queueIndex.update { queue.indexOf(song) }
+        }
+        startPlayback(song)
+    }
+
     fun playPlaylist(playlist: Playlist, startIndex: Int = 0) {
         _queue.update { playlist.songs }
         if (_shuffleEnabled.value) {
@@ -491,6 +505,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         )
         repository.registerMediaObserver { loadSongs() }
     }
+
+    val allSongs: StateFlow<List<Song>> = _allSongs.asStateFlow()
 
     // -------------------------------------------------------------------------
     // Cleanup

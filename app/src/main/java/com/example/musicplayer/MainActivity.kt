@@ -218,12 +218,7 @@ private fun AppNavHost(
     navController: androidx.navigation.NavHostController,
     viewModel: MusicViewModel
 ) {
-    //TODO Remove debug when not needed
-    //debug
-    val currentEntry by navController.currentBackStackEntryAsState()
-    LaunchedEffect(currentEntry) {
-        android.util.Log.d("NAV", "Current route: ${currentEntry?.destination?.route}")
-    }
+    val allSongs by viewModel.allSongs.collectAsState()
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
@@ -245,7 +240,7 @@ private fun AppNavHost(
                 onSearchChange = viewModel::onSearchQueryChange,
                 currentSong = currentSong,
                 onSongClick = { song ->
-                    viewModel.playSong(song)
+                    viewModel.playSongInContext(song, allSongs)   // songs = filtered/displayed list
                     navController.navigate(Screen.NowPlaying.route) {
                         popUpTo(navController.graph.findStartDestination().id) {
                             saveState = true
@@ -317,7 +312,7 @@ private fun AppNavHost(
                         }
                     },
                     onSongClick = { song ->
-                        viewModel.playSong(song)
+                        viewModel.playSongInContext(song, it.songs)
                         navController.navigate(Screen.NowPlaying.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true
