@@ -16,8 +16,8 @@ android {
         applicationId = "com.example.musicplayer"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "2.0"
+        versionCode = 5
+        versionName = "2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -67,5 +67,6 @@ dependencies {
     implementation("androidx.media:media:1.8.0")
     implementation("androidx.room:room-runtime:2.8.4")
     implementation("androidx.room:room-ktx:2.8.4")        // for Flow and suspend support
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
     ksp("androidx.room:room-compiler:2.8.4")
 }
