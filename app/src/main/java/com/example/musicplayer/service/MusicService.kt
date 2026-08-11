@@ -6,6 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Binder
 import android.os.Build
@@ -32,9 +35,13 @@ class MusicService : Service() {
         fun onPlaybackError()
         fun onSkipToNext()
         fun onSkipToPrevious()
+
+        fun onAudioBecomingNoisy()
     }
 
     private val binder = MusicBinder()
+
+
     private var mediaPlayer: MediaPlayer? = null
     private var currentSong: Song? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -42,6 +49,40 @@ class MusicService : Service() {
     private var pendingSeekMs: Int? = null
 
     var listener: Listener? = null
+
+    // -------------------------------------------------------------------------
+    // Handling an audio device getting disconnected (speakers or headset, for example)
+    // -------------------------------------------------------------------------
+    //Pausing playback on connection
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                pause()
+                // Notify ViewModel so the UI reflects the pause
+                handler.post { listener?.onAudioBecomingNoisy() }
+            }
+        }
+    }
+
+    private var noisyReceiverRegistered = false
+
+    private fun registerNoisyReceiver() {
+        if (!noisyReceiverRegistered) {
+            registerReceiver(
+                noisyReceiver,
+                IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+            )
+            noisyReceiverRegistered = true
+        }
+    }
+
+    private fun unregisterNoisyReceiver() {
+        if (noisyReceiverRegistered) {
+            unregisterReceiver(noisyReceiver)
+            noisyReceiverRegistered = false
+        }
+    }
+
 
     // -------------------------------------------------------------------------
     // MediaSession — drives lock screen controls
@@ -63,6 +104,7 @@ class MusicService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterNoisyReceiver()
         handler.removeCallbacksAndMessages(null)
         mediaSession.release()
         releasePlayer()
@@ -152,16 +194,19 @@ class MusicService : Service() {
                 pendingSeekMs?.let { mp.seekTo(it) }
                 pendingSeekMs = null
                 mp.start()
+                registerNoisyReceiver()
                 updatePlaybackState(isPlaying = true, positionMs = 0L)
                 startForeground(NOTIFICATION_ID, buildNotification(song, isPlaying = true))
             }
             setOnCompletionListener {
+                unregisterNoisyReceiver()
                 updatePlaybackState(isPlaying = false)
                 handler.post { listener?.onSongCompleted() }
             }
             setOnErrorListener { _, _, _ ->
                 isPreparing = false
                 pendingSeekMs = null
+                unregisterNoisyReceiver()
                 updatePlaybackState(isPlaying = false)
                 handler.post { listener?.onPlaybackError() }
                 true
@@ -174,6 +219,7 @@ class MusicService : Service() {
 
     fun pause() {
         mediaPlayer?.pause()
+        unregisterNoisyReceiver()
         updatePlaybackState(
             isPlaying = false,
             positionMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
@@ -183,6 +229,7 @@ class MusicService : Service() {
 
     fun resume() {
         mediaPlayer?.start()
+        registerNoisyReceiver()
         updatePlaybackState(
             isPlaying = true,
             positionMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
@@ -191,6 +238,7 @@ class MusicService : Service() {
     }
 
     fun stop() {
+        unregisterNoisyReceiver()
         stopForeground(STOP_FOREGROUND_REMOVE)
         updatePlaybackState(isPlaying = false)
         releasePlayer()

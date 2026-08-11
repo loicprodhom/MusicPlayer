@@ -518,6 +518,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
 
     val allSongs: StateFlow<List<Song>> = _allSongs.asStateFlow()
 
+    override fun onAudioBecomingNoisy() {
+        // Service has already called pause() — just sync ViewModel state
+        _isPlaying.update { false }
+        stopProgressPolling()
+    }
+
     // -------------------------------------------------------------------------
     // Cleanup
     // -------------------------------------------------------------------------
