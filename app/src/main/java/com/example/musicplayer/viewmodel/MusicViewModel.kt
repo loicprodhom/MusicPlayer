@@ -272,19 +272,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         viewModelScope.launch(Dispatchers.IO) {
             repository.addSongToPlaylist(playlistId, song.id)
         }
+        appendSongsToQueueIfActive(playlistId, listOf(song))
     }
 
     fun addSongsToPlaylist(playlistId: Long, songs: Set<Song>) {
         viewModelScope.launch(Dispatchers.IO) {
             songs.forEach { song -> repository.addSongToPlaylist(playlistId, song.id) }
         }
-    }
-
-    fun removeSongFromPlaylist(playlistId: Long, song: Song) {
-        if (playlistId == RECENTLY_ADDED_ID) return
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.removeSongFromPlaylist(playlistId, song.id)
-        }
+        appendSongsToQueueIfActive(playlistId, songs.toList())
     }
 
     fun removeSongsFromRecentlyAdded(songs: Set<Song>) {
@@ -300,6 +295,31 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     fun removeSongsFromPlaylist(playlistId: Long, songs: Set<Song>) {
         viewModelScope.launch(Dispatchers.IO) {
             songs.forEach { song -> repository.removeSongFromPlaylist(playlistId, song.id) }
+        }
+    }
+
+    // Updates the current play queue (for when new songs are added to a currently playing list)
+    private fun appendSongsToQueueIfActive(playlistId: Long, songs: List<Song>) {
+        val currentQueue = _queue.value
+        if (currentQueue.isEmpty()) return
+
+        // Find the playlist in the current user playlists
+        val playlist = _userPlaylists.value.find { it.id == playlistId } ?: return
+
+        // Check if the queue matches this playlist by comparing song ID sets
+        val playlistSongIds = playlist.songs.map { it.id }.toSet()
+        val queueSongIds = currentQueue.map { it.id }.toSet()
+        if (playlistSongIds != queueSongIds) return
+
+        // Append only the songs not already in the queue (guard against duplicates)
+        val newSongs = songs.filter { song -> currentQueue.none { it.id == song.id } }
+        if (newSongs.isEmpty()) return
+
+        _queue.update { currentQueue + newSongs }
+
+        // If shuffle is on, append to shuffled queue too
+        if (_shuffleEnabled.value) {
+            _shuffledQueue.update { _shuffledQueue.value + newSongs.shuffled() }
         }
     }
 
