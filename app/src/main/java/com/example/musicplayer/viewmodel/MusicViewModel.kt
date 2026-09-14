@@ -232,6 +232,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         viewModelScope.launch(Dispatchers.IO) {
             repository.updatePlaylistSortOrder(playlistId, sortOrder)
         }
+
+        // If the current queue belongs to this playlist, reorder it to match
+        val currentQueue = _queue.value
+        if (currentQueue.isEmpty()) return
+
+        // Only reorder if the queue actually matches this playlist's songs
+        // (user might be playing a different playlist or the library)
+        val playlist = _userPlaylists.value.find { it.id == playlistId } ?: return
+        val playlistSongIds = playlist.songs.map { it.id }.toSet()
+        val queueSongIds = currentQueue.map { it.id }.toSet()
+        if (playlistSongIds != queueSongIds) return   // queue belongs to another playlist, don't touch it
+
+        val reorderedQueue = when (sortOrder) {
+            SortOrder.DEFAULT        -> playlist.songs
+            SortOrder.ALPHABETICAL   -> playlist.songs.sortedBy { it.title.lowercase() }
+            SortOrder.DATE_ASCENDING -> playlist.songs.sortedBy { it.dateAdded }
+        }
+
+        val currentSong = _currentSong.value
+        val newIndex = reorderedQueue.indexOfFirst { it.id == currentSong?.id }
+
+        _queue.update { reorderedQueue }
+        _queueIndex.update { if (newIndex >= 0) newIndex else 0 }
+
+        // If shuffle is on, rebuild the shuffled queue around the current song
+        if (_shuffleEnabled.value) {
+            buildShuffledQueue(preserveCurrent = true)
+        }
     }
 
     fun deletePlaylist(playlistId: Long) {
