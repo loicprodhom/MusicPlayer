@@ -296,6 +296,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         viewModelScope.launch(Dispatchers.IO) {
             songs.forEach { song -> repository.removeSongFromPlaylist(playlistId, song.id) }
         }
+        removeSongsFromQueueIfActive(playlistId, songs)
     }
 
     // Updates the current play queue (for when new songs are added to a currently playing list)
@@ -323,12 +324,56 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         }
     }
 
+    // Updates the current play queue (for when new songs are removed from a currently playing list)
+    private fun removeSongsFromQueueIfActive(playlistId: Long, songs: Set<Song>) {
+        val currentQueue = _queue.value
+        if (currentQueue.isEmpty()) return
+
+        val playlist = _userPlaylists.value.find { it.id == playlistId } ?: return
+
+        // Check queue matches this playlist (before removal, so compare excluding the songs being removed)
+        val removedIds = songs.map { it.id }.toSet()
+        val playlistSongIds = playlist.songs.map { it.id }.toSet()
+        val queueSongIds = currentQueue.map { it.id }.toSet()
+        // Queue should match playlist union removed songs (i.e. the pre-removal state)
+        if (queueSongIds != playlistSongIds && queueSongIds != (playlistSongIds + removedIds)) return
+
+        val currentSong = _currentSong.value
+
+        // Split into songs safe to remove now vs songs to defer
+        val (deferred, removable) = songs.partition { it.id == currentSong?.id }
+
+        // Immediately remove songs that are not currently playing
+        if (removable.isNotEmpty()) {
+            val removableIds = removable.map { it.id }.toSet()
+            val newQueue = currentQueue.filter { it.id !in removableIds }
+            val newIndex = newQueue.indexOfFirst { it.id == currentSong?.id }
+                .takeIf { it >= 0 } ?: (_queueIndex.value).coerceAtMost(newQueue.size - 1)
+
+            _queue.update { newQueue }
+            _queueIndex.update { newIndex }
+
+            if (_shuffleEnabled.value) {
+                _shuffledQueue.update { sq ->
+                    sq.filter { it.id !in removableIds }
+                }
+            }
+        }
+
+        // Deferred songs (the one currently playing) — remove once it completes
+        if (deferred.isNotEmpty()) {
+            pendingQueueRemovals.addAll(deferred.map { it.id })
+        }
+    }
+
+    private val pendingQueueRemovals = mutableSetOf<Long>()
+
     // -------------------------------------------------------------------------
     // Shuffle
     //
     // We maintain two parallel queues:
-    //   _queue        — original order
-    //   _shuffledQueue — Fisher-Yates shuffle, guaranteed no repeats until all
+    //   _queue         -> original order
+    //   _shuffledQueue -> Fisher-Yates shuffle, guaranteed no repeats until all
     //                    songs have played; reshuffled when repeat-all wraps
     //
     // _queueIndex always refers to the position in whichever queue is active.
@@ -520,6 +565,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         // Called directly from MusicService via the Listener interface.
         // Runs on the main thread (service posts it via handler.post).
         viewModelScope.launch {
+            // Flush any deferred removals now that the song has ended
+            if (pendingQueueRemovals.isNotEmpty()) {
+                val toRemove = pendingQueueRemovals.toSet()
+                pendingQueueRemovals.clear()
+
+                val newQueue = _queue.value.filter { it.id !in toRemove }
+                // Don't adjust index yet — the "when" block below will advance it
+                _queue.update { newQueue }
+                if (_shuffleEnabled.value) {
+                    _shuffledQueue.update { sq -> sq.filter { it.id !in toRemove } }
+                }
+            }
+
             when (_repeatMode.value) {
                 RepeatMode.REPEAT_ONE -> {
                     _currentSong.value?.let { startPlayback(it) }
