@@ -15,11 +15,13 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class QueuePersistence(private val context: Context) {
 
     companion object {
-        private val KEY_QUEUE        = stringPreferencesKey("queue_song_ids")
-        private val KEY_INDEX        = intPreferencesKey("queue_index")
-        private val KEY_POSITION_MS  = longPreferencesKey("queue_position_ms")
-        private val KEY_SHUFFLE      = stringPreferencesKey("shuffle_enabled")
-        private val KEY_REPEAT       = stringPreferencesKey("repeat_mode")
+        private val KEY_QUEUE            = stringPreferencesKey("queue_song_ids")
+        private val KEY_SHUFFLED_QUEUE   = stringPreferencesKey("shuffled_queue_song_ids")
+        private val KEY_INDEX            = intPreferencesKey("queue_index")
+        private val KEY_POSITION_MS      = longPreferencesKey("queue_position_ms")
+        private val KEY_SHUFFLE          = stringPreferencesKey("shuffle_enabled")
+        private val KEY_REPEAT           = stringPreferencesKey("repeat_mode")
+        private val KEY_ACTIVE_PLAYLIST  = longPreferencesKey("active_playlist_id")
     }
 
     // -------------------------------------------------------------------------
@@ -28,18 +30,25 @@ class QueuePersistence(private val context: Context) {
 
     suspend fun saveQueue(
         queue: List<Song>,
+        shuffledQueue: List<Song>,
         index: Int,
         positionMs: Int,
         shuffleEnabled: Boolean,
-        repeatMode: RepeatMode
+        repeatMode: RepeatMode,
+        activePlaylistId: Long?
     ) {
         context.dataStore.edit { prefs ->
-            // Store song IDs as a comma-separated string
-            prefs[KEY_QUEUE]       = queue.joinToString(",") { it.id.toString() }
-            prefs[KEY_INDEX]       = index
-            prefs[KEY_POSITION_MS] = positionMs.toLong()
-            prefs[KEY_SHUFFLE]     = shuffleEnabled.toString()
-            prefs[KEY_REPEAT]      = repeatMode.name
+            prefs[KEY_QUEUE]          = queue.joinToString(",") { it.id.toString() }
+            prefs[KEY_SHUFFLED_QUEUE] = shuffledQueue.joinToString(",") { it.id.toString() }
+            prefs[KEY_INDEX]          = index
+            prefs[KEY_POSITION_MS]    = positionMs.toLong()
+            prefs[KEY_SHUFFLE]        = shuffleEnabled.toString()
+            prefs[KEY_REPEAT]         = repeatMode.name
+            if (activePlaylistId != null) {
+                prefs[KEY_ACTIVE_PLAYLIST] = activePlaylistId
+            } else {
+                prefs.remove(KEY_ACTIVE_PLAYLIST)
+            }
         }
     }
 
@@ -55,14 +64,20 @@ class QueuePersistence(private val context: Context) {
         val songIds = idsRaw.split(",").mapNotNull { it.toLongOrNull() }
         if (songIds.isEmpty()) return null
 
+        val shuffledRaw = prefs[KEY_SHUFFLED_QUEUE] ?: ""
+        val shuffledIds = if (shuffledRaw.isBlank()) emptyList()
+        else shuffledRaw.split(",").mapNotNull { it.toLongOrNull() }
+
         return SavedQueue(
-            songIds      = songIds,
-            index        = prefs[KEY_INDEX] ?: 0,
-            positionMs   = prefs[KEY_POSITION_MS]?.toInt() ?: 0,
-            shuffleEnabled = prefs[KEY_SHUFFLE]?.toBooleanStrictOrNull() ?: false,
-            repeatMode   = prefs[KEY_REPEAT]?.let {
+            songIds         = songIds,
+            shuffledSongIds = shuffledIds,
+            index           = prefs[KEY_INDEX] ?: 0,
+            positionMs      = prefs[KEY_POSITION_MS]?.toInt() ?: 0,
+            shuffleEnabled  = prefs[KEY_SHUFFLE]?.toBooleanStrictOrNull() ?: false,
+            repeatMode      = prefs[KEY_REPEAT]?.let {
                 runCatching { RepeatMode.valueOf(it) }.getOrDefault(RepeatMode.REPEAT_ALL)
-            } ?: RepeatMode.REPEAT_ALL
+            } ?: RepeatMode.REPEAT_ALL,
+            activePlaylistId = prefs[KEY_ACTIVE_PLAYLIST]   // null if not set
         )
     }
 
@@ -73,8 +88,10 @@ class QueuePersistence(private val context: Context) {
 
 data class SavedQueue(
     val songIds: List<Long>,
+    val shuffledSongIds: List<Long>,
     val index: Int,
     val positionMs: Int,
     val shuffleEnabled: Boolean,
-    val repeatMode: RepeatMode
+    val repeatMode: RepeatMode,
+    val activePlaylistId: Long?
 )

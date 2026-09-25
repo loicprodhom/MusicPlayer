@@ -28,20 +28,23 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Sentinel playlist ID for the synthetic "Recently Added" playlist
-private const val RECENTLY_ADDED_ID = -1L
+private const val RECENTLY_ADDED_ID    = -1L
 private const val RECENTLY_ADDED_LIMIT = 200
 
+class MusicViewModel(application: Application) : AndroidViewModel(application),
+    MusicService.Listener {
 
-class MusicViewModel(application: Application) : AndroidViewModel(application), MusicService.Listener {
-
-    private val repository = MusicRepository(application)
+    private val repository       = MusicRepository(application)
     private val queuePersistence = QueuePersistence(application)
+
     @SuppressLint("StaticFieldLeak")
     private var musicService: MusicService? = null
 
+    // Tracks which playlist the active queue belongs to (null = library)
+    private var _activePlaylistId: Long? = null
+
     // -------------------------------------------------------------------------
-    // Broadcast receiver
+    // Broadcast receiver — notification buttons
     // -------------------------------------------------------------------------
 
     private val playbackReceiver = object : BroadcastReceiver() {
@@ -55,38 +58,90 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     }
 
     // -------------------------------------------------------------------------
+    // MusicService.Listener — direct callbacks from the service
+    // -------------------------------------------------------------------------
+
+    override fun onSongCompleted() {
+        viewModelScope.launch {
+            // Flush deferred removals before advancing
+            if (pendingQueueRemovals.isNotEmpty()) {
+                val toRemove = pendingQueueRemovals.toSet()
+                pendingQueueRemovals.clear()
+                val newQueue = _queue.value.filter { it.id !in toRemove }
+                _queue.update { newQueue }
+                if (_shuffleEnabled.value) {
+                    _shuffledQueue.update { sq -> sq.filter { it.id !in toRemove } }
+                }
+            }
+
+            when (_repeatMode.value) {
+                RepeatMode.REPEAT_ONE -> {
+                    _currentSong.value?.let { startPlayback(it) }
+                }
+                RepeatMode.REPEAT_ALL -> {
+                    val queue = activeQueue
+                    val next  = _queueIndex.value + 1
+                    if (next < queue.size) {
+                        _queueIndex.update { next }
+                        startPlayback(queue[next])
+                    } else {
+                        if (_shuffleEnabled.value) buildShuffledQueue(preserveCurrent = false)
+                        _queueIndex.update { 0 }
+                        activeQueue.getOrNull(0)?.let { startPlayback(it) }
+                    }
+                }
+                RepeatMode.OFF -> advanceQueue()
+            }
+        }
+    }
+
+    override fun onPlaybackError() {
+        _isPlaying.update { false }
+        stopProgressPolling()
+    }
+
+    override fun onSkipToNext()     { skipToNext() }
+    override fun onSkipToPrevious() { skipToPrevious() }
+
+    override fun onAudioBecomingNoisy() {
+        _isPlaying.update { false }
+        stopProgressPolling()
+        persistQueue()
+    }
+
+    // -------------------------------------------------------------------------
     // Queue restoration
     // -------------------------------------------------------------------------
 
-    // Holds the position to seek to on first resume after restore
     private var _restoredPositionMs: Int = 0
 
     private suspend fun restoreQueueIfAvailable() {
-        val saved = withContext(Dispatchers.IO) { queuePersistence.restoreQueue() }
-            ?: return
+        val saved = withContext(Dispatchers.IO) { queuePersistence.restoreQueue() } ?: return
 
-        // Resolve saved song IDs against the loaded library
         val resolvedQueue = saved.songIds.mapNotNull { id ->
             _allSongs.value.find { it.id == id }
         }
         if (resolvedQueue.isEmpty()) return
 
-        val song = resolvedQueue.getOrNull(saved.index) ?: resolvedQueue.first()
+        val resolvedShuffled = if (saved.shuffledSongIds.isNotEmpty())
+            saved.shuffledSongIds.mapNotNull { id -> _allSongs.value.find { it.id == id } }
+        else emptyList()
 
-        // Restore queue and playback state, but do not auto-play
+        val song = if (saved.shuffleEnabled && resolvedShuffled.isNotEmpty())
+            resolvedShuffled.getOrNull(saved.index) ?: resolvedShuffled.first()
+        else
+            resolvedQueue.getOrNull(saved.index) ?: resolvedQueue.first()
+
         _queue.update { resolvedQueue }
+        _shuffledQueue.update { resolvedShuffled }
         _queueIndex.update { saved.index }
         _currentSong.update { song }
         _shuffleEnabled.update { saved.shuffleEnabled }
         _repeatMode.update { saved.repeatMode }
-        _isPlaying.update { false }   // paused, user resumes manually
-
-        // Seek to saved position once the user resumes via togglePlayPause().
-        // We store it so MusicService can apply it when play() is first called.
-        _restoredPositionMs = saved.positionMs
+        _activePlaylistId    = saved.activePlaylistId
+        _isPlaying.update { false }
+        _restoredPositionMs  = saved.positionMs
     }
-
-
 
     // -------------------------------------------------------------------------
     // Permission
@@ -112,8 +167,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     }
 
     fun onServiceConnected(service: MusicService) {
-        musicService = service
-        service.listener = this          // register direct callback
+        musicService       = service
+        service.listener   = this
         registerReceiver()
         if (_hasPermission.value) {
             viewModelScope.launch {
@@ -128,6 +183,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     // -------------------------------------------------------------------------
 
     private val _allSongs = MutableStateFlow<List<Song>>(emptyList())
+    val allSongs: StateFlow<List<Song>> = _allSongs.asStateFlow()
 
     private val _songs = MutableStateFlow<List<Song>>(emptyList())
     val songs: StateFlow<List<Song>> = _songs.asStateFlow()
@@ -147,11 +203,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         }
     }
 
+    // Called from the MediaStore observer — fire and forget
     private fun loadSongs() {
         viewModelScope.launch { loadSongsInternal() }
     }
 
-    //Internal handling of song loading to minimise signature change impact
+    // Suspend version used by onServiceConnected so restoreQueue runs after songs load
     private suspend fun loadSongsInternal() {
         val loaded = withContext(Dispatchers.IO) { repository.loadSongs() }
         _allSongs.update { loaded }
@@ -161,7 +218,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     }
 
     // -------------------------------------------------------------------------
-    // Recently Added: synthetic playlist, refreshed on every library load
+    // Recently Added — synthetic playlist
     // -------------------------------------------------------------------------
 
     private val _recentlyAdded = MutableStateFlow(
@@ -178,8 +235,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         }
     }
 
+    fun removeSongsFromRecentlyAdded(songs: Set<Song>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            songs.forEach { repository.excludeSongFromRecentlyAdded(it.id) }
+            refreshRecentlyAdded()
+        }
+    }
+
     // -------------------------------------------------------------------------
-    // Playlists: Room-backed, with Recently Added prepended
+    // Playlists — Room-backed, with Recently Added prepended
     // -------------------------------------------------------------------------
 
     private val _userPlaylists = MutableStateFlow<List<Playlist>>(emptyList())
@@ -193,16 +257,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
 
     private fun observePlaylists() {
         viewModelScope.launch {
-            // observePlaylists() now returns RawPlaylist(id, name, songIds).
-            // We resolve songIds against _allSongs.value INSIDE the collect lambda,
-            // so every Room emission uses the current song list, never a stale snapshot.
             repository.observePlaylists().collect { rawList ->
                 val resolved = rawList.map { raw ->
                     Playlist(
-                        id    = raw.id,
-                        name  = raw.name,
+                        id        = raw.id,
+                        name      = raw.name,
                         sortOrder = raw.sortOrder,
-                        songs = raw.songIds.mapNotNull { songId ->
+                        songs     = raw.songIds.mapNotNull { songId ->
                             _allSongs.value.find { it.id == songId }
                         }
                     )
@@ -223,7 +284,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     fun createPlaylistAndAdd(name: String, songs: Set<Song>) {
         viewModelScope.launch(Dispatchers.IO) {
             val newId = repository.createPlaylist(name)
-            songs.forEach { song -> repository.addSongToPlaylist(newId, song.id) }
+            songs.forEach { repository.addSongToPlaylist(newId, it.id) }
         }
     }
 
@@ -233,33 +294,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
             repository.updatePlaylistSortOrder(playlistId, sortOrder)
         }
 
-        // If the current queue belongs to this playlist, reorder it to match
+        // Reorder the active queue if it belongs to this playlist
         val currentQueue = _queue.value
         if (currentQueue.isEmpty()) return
-
-        // Only reorder if the queue actually matches this playlist's songs
-        // (user might be playing a different playlist or the library)
         val playlist = _userPlaylists.value.find { it.id == playlistId } ?: return
         val playlistSongIds = playlist.songs.map { it.id }.toSet()
-        val queueSongIds = currentQueue.map { it.id }.toSet()
-        if (playlistSongIds != queueSongIds) return   // queue belongs to another playlist, don't touch it
+        val queueSongIds    = currentQueue.map { it.id }.toSet()
+        if (playlistSongIds != queueSongIds) return
 
         val reorderedQueue = when (sortOrder) {
             SortOrder.DEFAULT        -> playlist.songs
             SortOrder.ALPHABETICAL   -> playlist.songs.sortedBy { it.title.lowercase() }
             SortOrder.DATE_ASCENDING -> playlist.songs.sortedBy { it.dateAdded }
         }
-
-        val currentSong = _currentSong.value
-        val newIndex = reorderedQueue.indexOfFirst { it.id == currentSong?.id }
-
+        val newIndex = reorderedQueue.indexOfFirst { it.id == _currentSong.value?.id }
         _queue.update { reorderedQueue }
         _queueIndex.update { if (newIndex >= 0) newIndex else 0 }
-
-        // If shuffle is on, rebuild the shuffled queue around the current song
-        if (_shuffleEnabled.value) {
-            buildShuffledQueue(preserveCurrent = true)
-        }
+        if (_shuffleEnabled.value) buildShuffledQueue(preserveCurrent = true)
     }
 
     fun deletePlaylist(playlistId: Long) {
@@ -269,98 +320,64 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
 
     fun addSongToPlaylist(playlistId: Long, song: Song) {
         if (playlistId == RECENTLY_ADDED_ID) return
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.addSongToPlaylist(playlistId, song.id)
-        }
+        viewModelScope.launch(Dispatchers.IO) { repository.addSongToPlaylist(playlistId, song.id) }
         appendSongsToQueueIfActive(playlistId, listOf(song))
     }
 
     fun addSongsToPlaylist(playlistId: Long, songs: Set<Song>) {
         viewModelScope.launch(Dispatchers.IO) {
-            songs.forEach { song -> repository.addSongToPlaylist(playlistId, song.id) }
+            songs.forEach { repository.addSongToPlaylist(playlistId, it.id) }
         }
         appendSongsToQueueIfActive(playlistId, songs.toList())
     }
 
-    fun removeSongsFromRecentlyAdded(songs: Set<Song>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            songs.forEach { song ->
-                repository.excludeSongFromRecentlyAdded(song.id)
-            }
-            // Refresh the playlist immediately so the UI updates
-            refreshRecentlyAdded()
-        }
-    }
-
     fun removeSongsFromPlaylist(playlistId: Long, songs: Set<Song>) {
+        if (playlistId == RECENTLY_ADDED_ID) return
         viewModelScope.launch(Dispatchers.IO) {
-            songs.forEach { song -> repository.removeSongFromPlaylist(playlistId, song.id) }
+            songs.forEach { repository.removeSongFromPlaylist(playlistId, it.id) }
         }
         removeSongsFromQueueIfActive(playlistId, songs)
     }
 
-    // Updates the current play queue (for when new songs are added to a currently playing list)
     private fun appendSongsToQueueIfActive(playlistId: Long, songs: List<Song>) {
         val currentQueue = _queue.value
         if (currentQueue.isEmpty()) return
-
-        // Find the playlist in the current user playlists
         val playlist = _userPlaylists.value.find { it.id == playlistId } ?: return
-
-        // Check if the queue matches this playlist by comparing song ID sets
         val playlistSongIds = playlist.songs.map { it.id }.toSet()
-        val queueSongIds = currentQueue.map { it.id }.toSet()
+        val queueSongIds    = currentQueue.map { it.id }.toSet()
         if (playlistSongIds != queueSongIds) return
-
-        // Append only the songs not already in the queue (guard against duplicates)
         val newSongs = songs.filter { song -> currentQueue.none { it.id == song.id } }
         if (newSongs.isEmpty()) return
-
         _queue.update { currentQueue + newSongs }
-
-        // If shuffle is on, append to shuffled queue too
         if (_shuffleEnabled.value) {
             _shuffledQueue.update { _shuffledQueue.value + newSongs.shuffled() }
         }
     }
 
-    // Updates the current play queue (for when new songs are removed from a currently playing list)
     private fun removeSongsFromQueueIfActive(playlistId: Long, songs: Set<Song>) {
         val currentQueue = _queue.value
         if (currentQueue.isEmpty()) return
-
         val playlist = _userPlaylists.value.find { it.id == playlistId } ?: return
-
-        // Check queue matches this playlist (before removal, so compare excluding the songs being removed)
-        val removedIds = songs.map { it.id }.toSet()
+        val removedIds      = songs.map { it.id }.toSet()
         val playlistSongIds = playlist.songs.map { it.id }.toSet()
-        val queueSongIds = currentQueue.map { it.id }.toSet()
-        // Queue should match playlist union removed songs (i.e. the pre-removal state)
+        val queueSongIds    = currentQueue.map { it.id }.toSet()
         if (queueSongIds != playlistSongIds && queueSongIds != (playlistSongIds + removedIds)) return
 
         val currentSong = _currentSong.value
-
-        // Split into songs safe to remove now vs songs to defer
         val (deferred, removable) = songs.partition { it.id == currentSong?.id }
 
-        // Immediately remove songs that are not currently playing
         if (removable.isNotEmpty()) {
             val removableIds = removable.map { it.id }.toSet()
-            val newQueue = currentQueue.filter { it.id !in removableIds }
-            val newIndex = newQueue.indexOfFirst { it.id == currentSong?.id }
-                .takeIf { it >= 0 } ?: (_queueIndex.value).coerceAtMost(newQueue.size - 1)
-
+            val newQueue     = currentQueue.filter { it.id !in removableIds }
+            val newIndex     = newQueue.indexOfFirst { it.id == currentSong?.id }
+                .takeIf { it >= 0 } ?: _queueIndex.value.coerceAtMost(newQueue.size - 1)
             _queue.update { newQueue }
             _queueIndex.update { newIndex }
-
             if (_shuffleEnabled.value) {
-                _shuffledQueue.update { sq ->
-                    sq.filter { it.id !in removableIds }
-                }
+                _shuffledQueue.update { sq -> sq.filter { it.id !in removableIds } }
             }
         }
 
-        // Deferred songs (the one currently playing) — remove once it completes
         if (deferred.isNotEmpty()) {
             pendingQueueRemovals.addAll(deferred.map { it.id })
         }
@@ -369,14 +386,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     private val pendingQueueRemovals = mutableSetOf<Long>()
 
     // -------------------------------------------------------------------------
-    // Shuffle
-    //
-    // We maintain two parallel queues:
-    //   _queue         -> original order
-    //   _shuffledQueue -> Fisher-Yates shuffle, guaranteed no repeats until all
-    //                    songs have played; reshuffled when repeat-all wraps
-    //
-    // _queueIndex always refers to the position in whichever queue is active.
+    // Shuffle & repeat
     // -------------------------------------------------------------------------
 
     private val _shuffleEnabled = MutableStateFlow(false)
@@ -385,11 +395,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     private val _repeatMode = MutableStateFlow(RepeatMode.REPEAT_ALL)
     val repeatMode: StateFlow<RepeatMode> = _repeatMode.asStateFlow()
 
-    private val _queue = MutableStateFlow<List<Song>>(emptyList())
+    private val _queue         = MutableStateFlow<List<Song>>(emptyList())
     private val _shuffledQueue = MutableStateFlow<List<Song>>(emptyList())
-    private val _queueIndex = MutableStateFlow(-1)
+    private val _queueIndex    = MutableStateFlow(-1)
 
-    /** The queue the player actually navigates — shuffled or original. */
     private val activeQueue get() =
         if (_shuffleEnabled.value) _shuffledQueue.value else _queue.value
 
@@ -398,7 +407,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         _shuffleEnabled.update { enabling }
         if (enabling) {
             buildShuffledQueue(preserveCurrent = true)
+        } else {
+            // Re-apply the playlist's persisted sort order when turning shuffle off
+            val playlist = _activePlaylistId?.let { id ->
+                _userPlaylists.value.find { it.id == id }
+            }
+            val sortedQueue = if (playlist != null) {
+                when (playlist.sortOrder) {
+                    SortOrder.DEFAULT        -> playlist.songs
+                    SortOrder.ALPHABETICAL   -> playlist.songs.sortedBy { it.title.lowercase() }
+                    SortOrder.DATE_ASCENDING -> playlist.songs.sortedBy { it.dateAdded }
+                }
+            } else {
+                _queue.value
+            }
+            val newIndex = sortedQueue.indexOfFirst { it.id == _currentSong.value?.id }
+            _queue.update { sortedQueue }
+            _queueIndex.update { if (newIndex >= 0) newIndex else 0 }
         }
+        persistQueue()
     }
 
     fun cycleRepeatMode() {
@@ -411,18 +438,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         }
     }
 
-    /**
-     * Fisher-Yates shuffle.
-     * When [preserveCurrent] is true, the current song is pinned to index 0
-     * so playback continues uninterrupted, and remaining songs are shuffled after it.
-     */
     private fun buildShuffledQueue(preserveCurrent: Boolean = false) {
         val original = _queue.value.toMutableList()
-        val current = _currentSong.value
-
+        val current  = _currentSong.value
         if (preserveCurrent && current != null) {
             original.remove(current)
-            original.shuffle()                      // Fisher-Yates via Kotlin stdlib
+            original.shuffle()
             _shuffledQueue.update { listOf(current) + original }
             _queueIndex.update { 0 }
         } else {
@@ -448,11 +469,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     private var progressJob: Job? = null
 
     fun playSong(song: Song) {
+        _activePlaylistId = null
         val queue = _allSongs.value
         _queue.update { queue }
         if (_shuffleEnabled.value) {
             buildShuffledQueue(preserveCurrent = false)
-            // Place the tapped song at index 0 so it plays first
             val shuffled = _shuffledQueue.value.toMutableList()
             shuffled.remove(song)
             _shuffledQueue.update { listOf(song) + shuffled }
@@ -463,7 +484,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         startPlayback(song)
     }
 
-    fun playSongInContext(song: Song, queue: List<Song>) {
+    fun playSongInContext(song: Song, queue: List<Song>, playlistId: Long? = null) {
+        _activePlaylistId = playlistId
         _queue.update { queue }
         if (_shuffleEnabled.value) {
             buildShuffledQueue(preserveCurrent = false)
@@ -478,6 +500,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     }
 
     fun playPlaylist(playlist: Playlist, startIndex: Int = 0) {
+        _activePlaylistId = playlist.id
         _queue.update { playlist.songs }
         if (_shuffleEnabled.value) {
             buildShuffledQueue(preserveCurrent = false)
@@ -496,17 +519,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
             stopProgressPolling()
             persistQueue()
         } else {
-            val currentSong = _currentSong.value
-            if (currentSong != null && !service.isPlaying() && service.getDuration() == 0) {
-                // Service has no active player, this is a cold resume after restore.
-                // Start playback then seek to the saved position.
-                val positionToSeek = _restoredPositionMs
+            val current = _currentSong.value
+            if (current != null && !service.isPlaying() && service.getDuration() == 0) {
+                // Cold resume after restore — start player and seek to saved position
+                val positionToSeek  = _restoredPositionMs
                 _restoredPositionMs = 0
                 stopProgressPolling()
-                service.play(currentSong)
+                service.play(current)
                 _isPlaying.update { true }
                 startProgressPolling()
-                // Seek is applied via pendingSeekMs in MusicService once prepared
                 if (positionToSeek > 0) service.seekTo(positionToSeek)
             } else {
                 service.resume()
@@ -517,7 +538,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     }
 
     fun seekTo(fraction: Float) {
-        val service = musicService ?: return
+        val service    = musicService ?: return
         val positionMs = (fraction * service.getDuration()).toInt()
         service.seekTo(positionMs)
         _progress.update { fraction }
@@ -525,12 +546,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
 
     fun skipToNext() {
         val queue = activeQueue
-        val next = _queueIndex.value + 1
+        val next  = _queueIndex.value + 1
         if (next < queue.size) {
             _queueIndex.update { next }
             startPlayback(queue[next])
         } else {
-            // End of queue
             when (_repeatMode.value) {
                 RepeatMode.REPEAT_ALL -> {
                     if (_shuffleEnabled.value) buildShuffledQueue(preserveCurrent = false)
@@ -538,7 +558,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
                     activeQueue.getOrNull(0)?.let { startPlayback(it) }
                 }
                 else -> {
-                    // REPEAT_ONE handled by the service, OFF stops here
                     _isPlaying.update { false }
                     _progress.update { 0f }
                     stopProgressPolling()
@@ -554,73 +573,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
             return
         }
         val queue = activeQueue
-        val prev = (_queueIndex.value - 1).coerceAtLeast(0)
+        val prev  = (_queueIndex.value - 1).coerceAtLeast(0)
         if (prev != _queueIndex.value) {
             _queueIndex.update { prev }
             startPlayback(queue[prev])
         }
     }
 
-    override fun onSongCompleted() {
-        // Called directly from MusicService via the Listener interface.
-        // Runs on the main thread (service posts it via handler.post).
-        viewModelScope.launch {
-            // Flush any deferred removals now that the song has ended
-            if (pendingQueueRemovals.isNotEmpty()) {
-                val toRemove = pendingQueueRemovals.toSet()
-                pendingQueueRemovals.clear()
-
-                val newQueue = _queue.value.filter { it.id !in toRemove }
-                // Don't adjust index yet — the "when" block below will advance it
-                _queue.update { newQueue }
-                if (_shuffleEnabled.value) {
-                    _shuffledQueue.update { sq -> sq.filter { it.id !in toRemove } }
-                }
-            }
-
-            when (_repeatMode.value) {
-                RepeatMode.REPEAT_ONE -> {
-                    _currentSong.value?.let { startPlayback(it) }
-                }
-                RepeatMode.REPEAT_ALL -> {
-                    val queue = activeQueue
-                    val next = _queueIndex.value + 1
-                    if (next < queue.size) {
-                        _queueIndex.update { next }
-                        startPlayback(queue[next])
-                    } else {
-                        if (_shuffleEnabled.value) buildShuffledQueue(preserveCurrent = false)
-                        _queueIndex.update { 0 }
-                        activeQueue.getOrNull(0)?.let { startPlayback(it) }
-                    }
-                }
-                RepeatMode.OFF -> advanceQueue()
-            }
-        }
-    }
-
-    override fun onPlaybackError() {
-        _isPlaying.update { false }
-        stopProgressPolling()
-    }
-
-    override fun onSkipToNext() {
-        skipToNext()
-    }
-
-    override fun onSkipToPrevious() {
-        skipToPrevious()
-    }
-
-    /** Move to the next song, stopping at end of queue if repeat is off. */
     private fun advanceQueue() {
         val queue = activeQueue
-        val next = _queueIndex.value + 1
+        val next  = _queueIndex.value + 1
         if (next < queue.size) {
             _queueIndex.update { next }
             startPlayback(queue[next])
         } else {
-            // End of queue
             _isPlaying.update { false }
             _progress.update { 0f }
             stopProgressPolling()
@@ -640,11 +606,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         val service = musicService ?: return
         viewModelScope.launch(Dispatchers.IO) {
             queuePersistence.saveQueue(
-                queue          = _queue.value,
-                index          = _queueIndex.value,
-                positionMs     = service.getCurrentPosition(),
-                shuffleEnabled = _shuffleEnabled.value,
-                repeatMode     = _repeatMode.value
+                queue            = _queue.value,
+                shuffledQueue    = _shuffledQueue.value,
+                index            = _queueIndex.value,
+                positionMs       = service.getCurrentPosition(),
+                shuffleEnabled   = _shuffleEnabled.value,
+                repeatMode       = _repeatMode.value,
+                activePlaylistId = _activePlaylistId
             )
         }
     }
@@ -658,15 +626,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         progressJob = viewModelScope.launch {
             while (true) {
                 delay(500)
-                // Only poll if ViewModel believes we are playing
                 if (_isPlaying.value) {
                     val service = musicService ?: continue
-                    val dur = service.getDuration()
+                    val dur     = service.getDuration()
                     if (dur > 0) {
-                        _progress.update { service.getCurrentPosition().toFloat() / dur.toFloat() }
+                        _progress.update {
+                            service.getCurrentPosition().toFloat() / dur.toFloat()
+                        }
                     }
-                    // If service reports not playing but ViewModel thinks it is,
-                    // it means prepareAsync hasn't completed yet. Just wait
                 }
             }
         }
@@ -686,7 +653,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
             addAction(MusicService.ACTION_TOGGLE_PLAYBACK)
             addAction(MusicService.ACTION_PREVIOUS)
             addAction(MusicService.ACTION_NEXT)
-            // Completion and error now go through MusicService.Listener directly
         }
         ContextCompat.registerReceiver(
             getApplication(),
@@ -697,14 +663,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
         repository.registerMediaObserver { loadSongs() }
     }
 
-    val allSongs: StateFlow<List<Song>> = _allSongs.asStateFlow()
-
-    override fun onAudioBecomingNoisy() {
-        // Service has already called pause(), just sync ViewModel state
-        _isPlaying.update { false }
-        stopProgressPolling()
-    }
-
     // -------------------------------------------------------------------------
     // Cleanup
     // -------------------------------------------------------------------------
@@ -712,7 +670,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application), 
     override fun onCleared() {
         super.onCleared()
         stopProgressPolling()
-        musicService?.listener = null    // avoid leaking the ViewModel
+        musicService?.listener = null
         repository.unregisterObserver()
         getApplication<Application>().unregisterReceiver(playbackReceiver)
     }

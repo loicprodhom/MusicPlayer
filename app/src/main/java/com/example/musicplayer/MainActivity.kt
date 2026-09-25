@@ -240,7 +240,7 @@ private fun AppNavHost(
                 onSearchChange = viewModel::onSearchQueryChange,
                 currentSong = currentSong,
                 onSongClick = { song ->
-                    viewModel.playSongInContext(song, allSongs)   // songs = filtered/displayed list
+                    viewModel.playSongInContext(song, allSongs, null)   // songs = filtered/displayed list
                     navController.navigate(Screen.NowPlaying.route) {
                         popUpTo(navController.graph.findStartDestination().id) {
                             saveState = true
@@ -302,7 +302,7 @@ private fun AppNavHost(
                     currentSong = currentSong,
                     allPlaylists = playlists,
                     onPlayAll = { sortedSongs ->
-                        viewModel.playSongInContext(sortedSongs.first(), sortedSongs)
+                        viewModel.playSongInContext(sortedSongs.first(), sortedSongs, it.id)
                         navController.navigate(Screen.NowPlaying.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true
@@ -315,7 +315,7 @@ private fun AppNavHost(
                         viewModel.updatePlaylistSortOrder(it.id, sortOrder)
                     },
                     onSongClick = { song ->
-                        viewModel.playSongInContext(song, it.songs)
+                        viewModel.playSongInContext(song, it.songs, it.id)
                         navController.navigate(Screen.NowPlaying.route) {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true
