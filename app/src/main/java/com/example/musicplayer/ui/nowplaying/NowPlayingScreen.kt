@@ -129,29 +129,46 @@ fun NowPlayingScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                IconButton(onClick = onToggleShuffle) {
-                    Icon(
-                        painter = painterResource(R.drawable.baseline_shuffle_24),
-                        contentDescription = "Shuffle",
-                        tint = if (shuffleEnabled)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                // Shuffle
+                if (shuffleEnabled) {
+                    FilledTonalIconButton(onClick = onToggleShuffle) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_shuffle_24),
+                            contentDescription = "Shuffle on"
+                        )
+                    }
+                } else {
+                    IconButton(onClick = onToggleShuffle) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_shuffle_24),
+                            contentDescription = "Shuffle off",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-                IconButton(onClick = onCycleRepeat) {
-                    Icon(
-                        painter = painterResource(
-                            if (repeatMode == RepeatMode.REPEAT_ONE)
-                                R.drawable.baseline_repeat_one_24
-                            else R.drawable.baseline_repeat_24
-                        ),
-                        contentDescription = "Repeat",
-                        tint = if (repeatMode != RepeatMode.OFF)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+
+                // Repeat
+                val repeatActive = repeatMode != RepeatMode.OFF
+                if (repeatActive) {
+                    FilledTonalIconButton(onClick = onCycleRepeat) {
+                        Icon(
+                            painter = painterResource(
+                                if (repeatMode == RepeatMode.REPEAT_ONE)
+                                    R.drawable.baseline_repeat_one_24
+                                else
+                                    R.drawable.baseline_repeat_24
+                            ),
+                            contentDescription = "Repeat: $repeatMode"
+                        )
+                    }
+                } else {
+                    IconButton(onClick = onCycleRepeat) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_repeat_24),
+                            contentDescription = "Repeat off",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }

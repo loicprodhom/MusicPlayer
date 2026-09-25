@@ -178,40 +178,60 @@ fun PlaylistDetailScreen(
                 )
 
                 // Sort alphabetically — hidden for Recently Added
+                val alphaActive = sortOrder == SortOrder.ALPHABETICAL
                 if (!isRecentlyAdded) {
-                    IconButton(onClick = {
-                        val next = if (sortOrder == SortOrder.ALPHABETICAL)
-                            SortOrder.DEFAULT else SortOrder.ALPHABETICAL
-                        sortOrder = next
-                        onSortOrderChanged(next)
-                    }) {
-                        Icon(
-                            painter = painterResource(R.drawable.baseline_sort_by_alpha_24),
-                            contentDescription = "Sort alphabetically",
-                            tint = if (sortOrder == SortOrder.ALPHABETICAL)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    if (alphaActive) {
+                        FilledTonalIconButton(onClick = {
+                            val next = SortOrder.DEFAULT
+                            sortOrder = next
+                            onSortOrderChanged(next)
+                        }) {
+                            Icon(
+                                painter = painterResource(R.drawable.baseline_sort_by_alpha_24),
+                                contentDescription = "Sort alphabetically"
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = {
+                            val next = SortOrder.ALPHABETICAL
+                            sortOrder = next
+                            onSortOrderChanged(next)
+                        }) {
+                            Icon(
+                                painter = painterResource(R.drawable.baseline_sort_by_alpha_24),
+                                contentDescription = "Sort alphabetically",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 
                 // Sort by date (oldest first) hidden for recently added
+                val dateActive = sortOrder == SortOrder.DATE_ASCENDING
                 if (!isRecentlyAdded) {
-                    IconButton(onClick = {
-                        val next = if (sortOrder == SortOrder.DATE_ASCENDING)
-                            SortOrder.DEFAULT else SortOrder.DATE_ASCENDING
-                        sortOrder = next
-                        onSortOrderChanged(next)
-                    }) {
-                        Icon(
-                            painter = painterResource(R.drawable.baseline_access_time_24),
-                            contentDescription = "Sort by date",
-                            tint = if (sortOrder == SortOrder.DATE_ASCENDING)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    if (dateActive) {
+                        FilledTonalIconButton(onClick = {
+                            val next = SortOrder.DEFAULT
+                            sortOrder = next
+                            onSortOrderChanged(next)
+                        }) {
+                            Icon(
+                                painter = painterResource(R.drawable.baseline_access_time_24),
+                                contentDescription = "Sort by date"
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = {
+                            val next = SortOrder.DATE_ASCENDING
+                            sortOrder = next
+                            onSortOrderChanged(next)
+                        }) {
+                            Icon(
+                                painter = painterResource(R.drawable.baseline_access_time_24),
+                                contentDescription = "Sort by date",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 
