@@ -5,8 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Intent
 import android.content.BroadcastReceiver
+import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
 import android.media.MediaPlayer
@@ -27,7 +27,7 @@ import com.example.musicplayer.data.Song
 class MusicService : Service() {
 
     // -------------------------------------------------------------------------
-    // Callback interface
+    // Callback interface — ViewModel implements this
     // -------------------------------------------------------------------------
 
     interface Listener {
@@ -35,13 +35,11 @@ class MusicService : Service() {
         fun onPlaybackError()
         fun onSkipToNext()
         fun onSkipToPrevious()
-
         fun onAudioBecomingNoisy()
+        fun onTogglePlayPause()    // ← new: routes MediaSession play/pause to ViewModel
     }
 
     private val binder = MusicBinder()
-
-
     private var mediaPlayer: MediaPlayer? = null
     private var currentSong: Song? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -51,14 +49,13 @@ class MusicService : Service() {
     var listener: Listener? = null
 
     // -------------------------------------------------------------------------
-    // Handling an audio device getting disconnected (speakers or headset, for example)
+    // Noisy receiver
     // -------------------------------------------------------------------------
-    //Pausing playback on connection
+
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
                 pause()
-                // Notify ViewModel so the UI reflects the pause
                 handler.post { listener?.onAudioBecomingNoisy() }
             }
         }
@@ -68,10 +65,7 @@ class MusicService : Service() {
 
     private fun registerNoisyReceiver() {
         if (!noisyReceiverRegistered) {
-            registerReceiver(
-                noisyReceiver,
-                IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-            )
+            registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
             noisyReceiverRegistered = true
         }
     }
@@ -83,9 +77,8 @@ class MusicService : Service() {
         }
     }
 
-
     // -------------------------------------------------------------------------
-    // MediaSession — drives lock screen controls
+    // MediaSession
     // -------------------------------------------------------------------------
 
     private lateinit var mediaSession: MediaSessionCompat
@@ -110,27 +103,26 @@ class MusicService : Service() {
         releasePlayer()
     }
 
-    // -------------------------------------------------------------------------
-    // MediaSession setup
-    // -------------------------------------------------------------------------
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        mediaSession.isActive = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
 
     @Suppress("DEPRECATION")
     private fun setupMediaSession() {
         mediaSession = MediaSessionCompat(this, "MusicPlayerSession").apply {
-            // Handle lock screen / Bluetooth / headset button actions
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay()  { resume() }
-                override fun onPause() { pause() }
-                override fun onStop()  { stop() }
+                // ALL actions route through the Listener so the ViewModel
+                // is the single source of truth for playback state.
+                // The service's pause()/resume() are only called by the ViewModel.
+                override fun onPlay()            { handler.post { listener?.onTogglePlayPause() } }
+                override fun onPause()           { handler.post { listener?.onTogglePlayPause() } }
+                override fun onSkipToNext()      { handler.post { listener?.onSkipToNext() } }
+                override fun onSkipToPrevious()  { handler.post { listener?.onSkipToPrevious() } }
                 override fun onSeekTo(pos: Long) { seekTo(pos.toInt()) }
-
-                override fun onSkipToNext() {
-                    listener?.onSkipToNext()
-                }
-
-                override fun onSkipToPrevious() {
-                    listener?.onSkipToPrevious()
-                }
+                override fun onStop()            { stop() }
             })
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
@@ -173,7 +165,7 @@ class MusicService : Service() {
     }
 
     // -------------------------------------------------------------------------
-    // Playback controls
+    // Playback controls — called only by the ViewModel
     // -------------------------------------------------------------------------
 
     fun play(song: Song) {
@@ -221,7 +213,7 @@ class MusicService : Service() {
         mediaPlayer?.pause()
         unregisterNoisyReceiver()
         updatePlaybackState(
-            isPlaying = false,
+            isPlaying  = false,
             positionMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
         )
         currentSong?.let { updateNotification(it, isPlaying = false) }
@@ -231,7 +223,7 @@ class MusicService : Service() {
         mediaPlayer?.start()
         registerNoisyReceiver()
         updatePlaybackState(
-            isPlaying = true,
+            isPlaying  = true,
             positionMs = mediaPlayer?.currentPosition?.toLong() ?: 0L
         )
         currentSong?.let { updateNotification(it, isPlaying = true) }
@@ -250,7 +242,7 @@ class MusicService : Service() {
         } else {
             mediaPlayer?.seekTo(positionMs)
             updatePlaybackState(
-                isPlaying = mediaPlayer?.isPlaying == true,
+                isPlaying  = mediaPlayer?.isPlaying == true,
                 positionMs = positionMs.toLong()
             )
         }
@@ -319,7 +311,7 @@ class MusicService : Service() {
             .setStyle(
                 MediaStyle()
                     .setShowActionsInCompactView(0, 1, 2)
-                    .setMediaSession(mediaSession.sessionToken)  // ← links to lock screen
+                    .setMediaSession(mediaSession.sessionToken)
             )
             .build()
     }
@@ -329,25 +321,9 @@ class MusicService : Service() {
             .notify(NOTIFICATION_ID, buildNotification(song, isPlaying))
     }
 
-    // -------------------------------------------------------------------------
-    // Cleanup
-    // -------------------------------------------------------------------------
-
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        mediaSession.isActive = false
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-    }
-
-    // -------------------------------------------------------------------------
-    // Constants
-    // -------------------------------------------------------------------------
-
     companion object {
-        const val CHANNEL_ID = "music_playback_channel"
-        const val NOTIFICATION_ID = 1
-
+        const val CHANNEL_ID             = "music_playback_channel"
+        const val NOTIFICATION_ID        = 1
         const val ACTION_TOGGLE_PLAYBACK = "com.example.musicplayer.TOGGLE_PLAYBACK"
         const val ACTION_PREVIOUS        = "com.example.musicplayer.PREVIOUS"
         const val ACTION_NEXT            = "com.example.musicplayer.NEXT"

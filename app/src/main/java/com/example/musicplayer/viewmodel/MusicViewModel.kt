@@ -109,6 +109,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application),
         persistQueue()
     }
 
+    override fun onTogglePlayPause() {
+        togglePlayPause()
+    }
+
     // -------------------------------------------------------------------------
     // Queue restoration
     // -------------------------------------------------------------------------
@@ -139,7 +143,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application),
         _shuffleEnabled.update { saved.shuffleEnabled }
         _repeatMode.update { saved.repeatMode }
         _activePlaylistId    = saved.activePlaylistId
-        _isPlaying.update { false }
+        _isPlaying.update { saved.isPlaying }
+        if (saved.isPlaying) startProgressPolling()
         _restoredPositionMs  = saved.positionMs
     }
 
@@ -521,7 +526,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application),
         } else {
             val current = _currentSong.value
             if (current != null && !service.isPlaying() && service.getDuration() == 0) {
-                // Cold resume after restore — start player and seek to saved position
+                // Cold resume after restore
                 val positionToSeek  = _restoredPositionMs
                 _restoredPositionMs = 0
                 stopProgressPolling()
@@ -610,6 +615,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application),
                 shuffledQueue    = _shuffledQueue.value,
                 index            = _queueIndex.value,
                 positionMs       = service.getCurrentPosition(),
+                isPlaying        = _isPlaying.value,
                 shuffleEnabled   = _shuffleEnabled.value,
                 repeatMode       = _repeatMode.value,
                 activePlaylistId = _activePlaylistId
